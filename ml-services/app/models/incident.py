@@ -19,3 +19,5 @@ class Incident(BaseModel):
     timestamp: datetime | None = None
 
     url: str | None = None
+    location: str | None = None
+    country: str | None = None

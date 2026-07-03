@@ -7,3 +7,5 @@ rapidfuzz==3.9.0
 atproto==0.0.55
 google-genai==1.0.0
 google-cloud-aiplatform==1.60.0
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.30

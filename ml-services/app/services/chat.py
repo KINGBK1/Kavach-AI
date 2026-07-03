@@ -1,68 +1,56 @@
 # app/services/chat.py
 import json
-from app.core.db import get_conn
 from app.services.llm import ask_llm
+from app.services.query_parser import parse_query
+from app.services.retriever import retrieve_incidents
 
 CHAT_SYSTEM_PROMPT = """/no_think
-You are VARUNA AI, an intelligent disaster response assistant.
+You are VARUNA AI, an emergency response analyst.
 
-You have access to real-time disaster incident data from NASA EONET, USGS, GDACS, and social media.
+You will receive a set of disaster incidents and the user's question.
+Answer ONLY using the provided incidents.
+If no incidents match, explicitly say no matching incidents were found.
+Do not hallucinate.
+Provide concise, actionable summaries.
 
-Answer the user's question based on the incident data provided.
-Be concise, specific, and actionable.
-If asked about specific locations, mention coordinates.
-If asked for recommendations, be specific about emergency response actions.
-Always prioritize life safety in your recommendations.
-
-Return a JSON response with this schema:
+Return valid JSON only with this schema:
 {
-    "answer": "your detailed answer here",
+    "answer": "",
     "relevant_incidents": [],
     "confidence": 0.0
 }
 """
 
 
-def _get_incidents_context() -> str:
-    with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT
-                i.title,
-                i.category,
-                i.source,
-                i.latitude,
-                i.longitude,
-                a.severity,
-                a.priority_score,
-                a.summary,
-                a.incident_type,
-                a.recommended_actions
-            FROM analyses a
-            JOIN incidents i ON a.incident_id = i.id
-            ORDER BY a.priority_score DESC
-            LIMIT 20
-        """).fetchall()
+def _render_incident(incident: dict) -> str:
+    recommendations = incident.get("recommended_actions") or []
+    if isinstance(recommendations, str):
+        recommendations = json.loads(recommendations)
+    return (
+        f"{incident.get('title')}\n"
+        f"   Type: {incident.get('incident_type')} | Category: {incident.get('category')}\n"
+        f"   Source: {incident.get('source')}\n"
+        f"   Location: {incident.get('location') or incident.get('country') or incident.get('latitude') or 'Unknown'}\n"
+        f"   Severity: {incident.get('severity')} | Priority: {incident.get('priority_score')}\n"
+        f"   Summary: {incident.get('summary')}\n"
+        f"   Actions: {', '.join(recommendations)}"
+    )
 
-    if not rows:
-        return "No incidents have been analyzed yet."
 
-    context = "Current disaster incidents (sorted by priority):\n\n"
-    for i, row in enumerate(rows, 1):
-        context += f"""
-{i}. {row['title']}
-   Type: {row['incident_type']} | Category: {row['category']}
-   Source: {row['source']}
-   Location: {row['latitude']}, {row['longitude']}
-   Severity: {row['severity']} | Priority: {row['priority_score']}/100
-   Summary: {row['summary']}
-   Actions: {', '.join(json.loads(row['recommended_actions']))}
----"""
+def _render_incidents(incidents: list[dict]) -> str:
+    if not incidents:
+        return "No matching incidents were found."
 
-    return context
+    entries = ["Relevant incidents:"]
+    for index, incident in enumerate(incidents, start=1):
+        entries.append(f"{index}. {_render_incident(incident)}")
+    return "\n\n".join(entries)
 
 
 def answer_question(question: str) -> dict:
-    context = _get_incidents_context()
+    parsed = parse_query(question)
+    incidents = retrieve_incidents(question)
+    context = _render_incidents(incidents)
 
     user_prompt = f"""
 Incident Data:
@@ -80,15 +68,17 @@ User Question:
 
         return {
             "answer": data.get("answer", ""),
-            "relevant_incidents": data.get("relevant_incidents", []),
+            "relevant_incidents": data.get("relevant_incidents", incidents),
             "confidence": data.get("confidence", 0.0),
             "model": result["model"],
             "processing_time_ms": result["processing_time_ms"],
+            "parsed_query": parsed,
         }
 
     except Exception as e:
         return {
             "answer": f"I encountered an error processing your question: {str(e)}",
-            "relevant_incidents": [],
+            "relevant_incidents": incidents,
             "confidence": 0.0,
+            "parsed_query": parsed,
         }

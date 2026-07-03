@@ -6,6 +6,8 @@ from app.connectors.nasa import NASAConnector
 from app.connectors.gdacs import GDACSConnector
 from app.connectors.reddit import RedditConnector
 from app.connectors.bluesky import BlueskyConnector
+from app.connectors.firms import FIRMSConnector
+
 from app.services.aggregator import IncidentAggregator
 
 router = APIRouter(
@@ -76,6 +78,13 @@ def bluesky(query: str, limit: int = 20):
     incidents = connector.normalize(raw)
 
     return incidents
+
+@router.get("/firms")
+def firms_hotspots(limit: int = Query(default=20, ge=1, le=100)):
+    connector = FIRMSConnector()
+    raw = connector.fetch()
+    incidents = connector.normalize(raw)
+    return incidents[:limit]
 
 @router.get("/all")
 def all_sources():

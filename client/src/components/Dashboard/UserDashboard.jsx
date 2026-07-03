@@ -11,6 +11,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import PageShell from "../Layout/PageShell";
 import { getDashboard } from "../../api/varunaApi";
+import { lookUpLocationName } from "../../utils/geolocation";
 import {
   SeverityBadge,
   PriorityScore,
@@ -50,6 +51,7 @@ const UserDashboard = () => {
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [locationLabels, setLocationLabels] = useState({});
 
   const load = useCallback(async (isRefresh = false) => {
     isRefresh ? setRefreshing(true) : setLoading(true);
@@ -74,6 +76,38 @@ const UserDashboard = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const pending = (data?.top_critical_incidents || []).filter(
+      (incident) =>
+        incident.latitude != null &&
+        incident.longitude != null &&
+        !locationLabels[incident.incident_id]
+    );
+
+    if (!pending.length) return;
+
+    let active = true;
+    const loadLabels = async () => {
+      const labels = {};
+      await Promise.all(
+        pending.map(async (incident) => {
+          const label = await lookUpLocationName(incident.latitude, incident.longitude);
+          if (active) {
+            labels[incident.incident_id] = label;
+          }
+        })
+      );
+      if (active) {
+        setLocationLabels((prev) => ({ ...prev, ...labels }));
+      }
+    };
+
+    loadLabels();
+    return () => {
+      active = false;
+    };
+  }, [data?.top_critical_incidents, locationLabels]);
 
   const summary = data?.summary || {};
   const severityBreakdown = data?.severity_breakdown || {};
@@ -202,7 +236,10 @@ const UserDashboard = () => {
                   </ul>
                 )}
                 <div className="v-critical-card-coords v-mono">
-                  <MapPin size={12} /> {incident.latitude?.toFixed(2)}, {incident.longitude?.toFixed(2)}
+                  <MapPin size={12} />
+                  {locationLabels[incident.incident_id]
+                    ? locationLabels[incident.incident_id]
+                    : `${incident.latitude?.toFixed(2)}, ${incident.longitude?.toFixed(2)}`}
                 </div>
               </div>
             ))}

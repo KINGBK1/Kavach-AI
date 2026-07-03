@@ -9,7 +9,9 @@
 //   POST /report               -> { description, latitude, longitude, category } -> AI analysis of the report
 import axios from "axios";
 
-const BASE_URL = import.meta.env.VITE_VARUNA_API_URL || "http://localhost:8000/api";
+const rawUrl = import.meta.env.VITE_VARUNA_API_URL;
+const trimmedUrl = rawUrl?.replace(/\/+$|\/api$/g, "") || "http://localhost:8000";
+const BASE_URL = `${trimmedUrl}/api`;
 
 const client = axios.create({
   baseURL: BASE_URL,

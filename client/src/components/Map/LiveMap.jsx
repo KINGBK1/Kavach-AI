@@ -6,6 +6,7 @@ import PageShell from "../Layout/PageShell";
 // import { getIncidents } from "../../api/varunaApi";
 import { getDashboard } from "../../api/varunaApi";
 import { SeverityBadge, SEVERITY_ORDER } from "../common/Severity";
+import { lookUpLocationName } from "../../utils/geolocation";
 import "./LiveMap.css";
 
 const SEVERITY_RADIUS = { Low: 6, Moderate: 8, High: 10, Critical: 13 };
@@ -49,6 +50,7 @@ const LiveMap = () => {
   const [locationStatus, setLocationStatus] = useState("prompt");
   const [locationError, setLocationError] = useState("");
   const [allowGlobal, setAllowGlobal] = useState(false);
+  const [locationNames, setLocationNames] = useState({});
 
   const requestLocation = useCallback(() => {
     if (!navigator?.geolocation) {
@@ -117,6 +119,34 @@ const LiveMap = () => {
     () => incidents.filter((i) => activeSeverities.has(i.severity) && i.latitude != null && i.longitude != null),
     [incidents, activeSeverities]
   );
+
+  useEffect(() => {
+    const pending = visibleIncidents.filter(
+      (incident) => !locationNames[incident.incident_id ?? incident.id]
+    );
+    if (!pending.length) return;
+
+    let active = true;
+    const fetchNames = async () => {
+      const names = {};
+      await Promise.all(
+        pending.map(async (incident) => {
+          const name = await lookUpLocationName(incident.latitude, incident.longitude);
+          if (active) {
+            names[incident.incident_id ?? incident.id] = name;
+          }
+        })
+      );
+      if (active) {
+        setLocationNames((prev) => ({ ...prev, ...names }));
+      }
+    };
+
+    fetchNames();
+    return () => {
+      active = false;
+    };
+  }, [visibleIncidents, locationNames]);
 
   const focusIncident = useMemo(
     () => incidents.find((i) => i.id === focusId || i.incident_id === focusId),
@@ -231,7 +261,7 @@ const LiveMap = () => {
                     <p className="v-map-popup-desc">{incident.description.slice(0, 220)}</p>
                   )}
                   <div className="v-map-popup-coords v-mono">
-                    {incident.latitude?.toFixed(3)}, {incident.longitude?.toFixed(3)}
+                    {locationNames[incident.incident_id ?? incident.id] || `${incident.latitude?.toFixed(3)}, ${incident.longitude?.toFixed(3)}`}
                   </div>
                   {incident.url && (
                     <a href={incident.url} target="_blank" rel="noopener noreferrer" className="v-map-popup-link">

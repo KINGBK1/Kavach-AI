@@ -11,14 +11,15 @@ from app.connectors.weather import WeatherConnector
 
 
 def _get_weather_context(latitude, longitude) -> str:
-    """Fetch weather at incident location and format for prompt."""
     try:
         if latitude is None or longitude is None:
             return ""
-
+        print(f"  [weather] fetching for {latitude}, {longitude}")
         connector = WeatherConnector()
         weather = connector.fetch(latitude, longitude)
-
+        print(f"  [weather] done")
+        if weather is None:
+            return ""
         return f"""
 Weather at incident location:
 - Temperature: {weather.temperature}°C
@@ -29,7 +30,7 @@ Weather at incident location:
 - Weather Code: {weather.weather_code}
 """
     except Exception as e:
-        print(f"Weather fetch failed: {e}")
+        print(f"  [weather] failed: {e}")
         return ""
 
 
@@ -75,19 +76,24 @@ def analyze_incident(incident: IncidentRequest):
 
 
 def analyze_fetched_incident(incident: Incident):
+    print(f"[ANALYZE] start: {incident.id}")
     extra = (
         f"\nSource: {incident.source}"
         f"\nCategory: {incident.category}"
         f"\nTitle: {incident.title}"
     )
+    print(f"[ANALYZE] building prompt")
     user_prompt = _build_prompt(
         incident.description,
         incident.latitude,
         incident.longitude,
         extra,
     )
+    print(f"[ANALYZE] calling LLM")
     llm_result = ask_llm(SYSTEM_PROMPT, user_prompt)
+    print(f"[ANALYZE] LLM done in {llm_result['processing_time_ms']}ms")
     analysis = parse_response(llm_result["response"])
+    print(f"[ANALYZE] complete: {incident.id}")
     return {
         "incident_id": incident.id,
         "source": incident.source,
