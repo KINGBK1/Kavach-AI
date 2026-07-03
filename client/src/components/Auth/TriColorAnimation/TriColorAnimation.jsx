@@ -30,7 +30,7 @@ const TriColorAnimation = ({ isVisible, onComplete, userName = "User" }) => {
   if (!isVisible) return null;
 
   return (
-    <div className="tricolor-overlay">
+    <div className="tricolor-overlay" aria-label={`Welcome ${userName}`}>
       <div className="tricolor-container">
 
         {/* Ashoka Chakra - Always visible and spinning */}

@@ -57,7 +57,7 @@ const UserDashboard = () => {
     isRefresh ? setRefreshing(true) : setLoading(true);
     setError(null);
     try {
-      const result = await getDashboard();
+      const result = await getDashboard({ force: isRefresh });
       setData(result);
       setLastUpdated(new Date());
     } catch (err) {

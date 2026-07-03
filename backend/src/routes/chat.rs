@@ -1,9 +1,16 @@
 // src/routes/chat.rs
-use axum::{Router, routing::post, extract::State, Json};
+
+use axum::{
+    extract::State,
+    http::StatusCode,
+    routing::post,
+    Json, Router,
+};
 use std::sync::Arc;
-use crate::state::AppState;
-use crate::services::ai_client::AiClient;
+
 use crate::models::analysis::{ChatRequest, ChatResponse};
+use crate::services::ai_client::AiClient;
+use crate::state::AppState;
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -14,10 +21,16 @@ pub fn router(state: Arc<AppState>) -> Router {
 async fn chat(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ChatRequest>,
-) -> Result<Json<ChatResponse>, String> {
+) -> Result<Json<ChatResponse>, StatusCode> {
     let client = AiClient::new(state.ai_service_url.clone());
-    client.chat(&payload.question)
+
+    let response = client
+        .chat(&payload.question)
         .await
-        .map(Json)
-        .map_err(|e| e.to_string())
+        .map_err(|e| {
+            tracing::error!("AI chat failed: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(response))
 }

@@ -12,10 +12,11 @@ import { GoogleLogin } from "@react-oauth/google";
 import axios from "axios";
 import "./SignUp.css";
 import { Link, useNavigate } from "react-router-dom";
-import { AuthContext } from "../../Auth/context/AuthContext";
+import { AuthContext } from "../../Auth/context/authContextValue";
 import TriColorAnimation from "../TriColorAnimation/TriColorAnimation";
 import nightImage from "../../../assets/night-mountain-city.jpg";
 import brandLogo from "../../../assets/varuna.png";
+import { API_BASE_URL, GOOGLE_AUTH_ENABLED } from "../../../config";
 
 const SignUpPage = () => {
   const navigate = useNavigate();
@@ -122,7 +123,7 @@ const SignUpPage = () => {
       }
 
       const res = await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/api/auth/register`,
+        `${API_BASE_URL}/auth/register`,
         payload
       );
 
@@ -144,7 +145,7 @@ const SignUpPage = () => {
   const handleGoogleSuccess = async (credentialResponse) => {
     try {
       const res = await axios.post(
-        `${import.meta.env.VITE_BACKEND_URL}/api/auth/google-login`,
+        `${API_BASE_URL}/auth/google-login`,
         { token: credentialResponse.credential },
         { withCredentials: true }
       );
@@ -468,7 +469,7 @@ const SignUpPage = () => {
 
             {userType && renderSpecificFields()}
 
-            {userType === "user" && (
+            {userType === "user" && GOOGLE_AUTH_ENABLED && (
               <div className="oauth-section">
                 <div className="divider-container">
                   <div className="line"></div>

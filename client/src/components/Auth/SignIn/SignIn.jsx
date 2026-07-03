@@ -4,11 +4,12 @@ import { GoogleLogin } from "@react-oauth/google";
 import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
 import { User, Eye, EyeOff, Shield } from "lucide-react";
-import { AuthContext } from "../../Auth/context/AuthContext";
+import { AuthContext } from "../../Auth/context/authContextValue";
 import TriColorAnimation from "../TriColorAnimation/TriColorAnimation";
 import "./SignIn.css";
 import nightImage from "../../../assets/night-mountain-city.jpg";
 import brandLogo from "../../../assets/varuna.png";
+import { API_BASE_URL, GOOGLE_AUTH_ENABLED } from "../../../config";
 
 const SignInPage = () => {
   const navigate = useNavigate();
@@ -47,7 +48,7 @@ const SignInPage = () => {
     }
 
     try {
-      const res = await axios.post(`${import.meta.env.VITE_BACKEND_URL}/api/auth/login`, {
+      const res = await axios.post(`${API_BASE_URL}/auth/login`, {
         username: formData.username,
         password: formData.password,
       });
@@ -64,7 +65,7 @@ const SignInPage = () => {
 
   const handleGoogleSuccess = async (credentialResponse) => {
     try {
-      const res = await axios.post(`${import.meta.env.VITE_BACKEND_URL}/api/auth/google-login`, {
+      const res = await axios.post(`${API_BASE_URL}/auth/google-login`, {
         token: credentialResponse.credential,
       });
       
@@ -179,17 +180,19 @@ const SignInPage = () => {
               </button>
             </div>
 
-            <div className="oauth-section">
-              <div className="divider">
-                <span className="divider__text">or continue with</span>
+            {GOOGLE_AUTH_ENABLED && (
+              <div className="oauth-section">
+                <div className="divider">
+                  <span className="divider__text">or continue with</span>
+                </div>
+                <div className="google-btn-wrapper">
+                  <GoogleLogin
+                    onSuccess={handleGoogleSuccess}
+                    onError={handleGoogleError}
+                  />
+                </div>
               </div>
-              <div className="google-btn-wrapper">
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={handleGoogleError}
-                />
-              </div>
-            </div>
+            )}
           </div>
 
           <div className="form__footer">

@@ -4,8 +4,9 @@ import { useLocation } from "react-router-dom";
 import { RefreshCw, AlertCircle, ExternalLink } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 // import { getIncidents } from "../../api/varunaApi";
-import { getDashboard } from "../../api/varunaApi";
-import { SeverityBadge, SEVERITY_ORDER } from "../common/Severity";
+import { getDashboard, invalidateDashboardCache } from "../../api/varunaApi";
+import { SeverityBadge } from "../common/Severity";
+import { SEVERITY_ORDER } from "../common/severityConfig";
 import { lookUpLocationName } from "../../utils/geolocation";
 import "./LiveMap.css";
 
@@ -88,11 +89,12 @@ const LiveMap = () => {
     locationStatus === "requesting" ||
     (locationStatus === "denied" && !allowGlobal);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getDashboard();
+      if (isRefresh) invalidateDashboardCache();
+      const data = await getDashboard({ force: isRefresh });
       setIncidents(Array.isArray(data?.all_incidents) ? data.all_incidents : []);
     } catch (err) {
       console.error("Failed to load sources:", err);
@@ -168,7 +170,7 @@ const LiveMap = () => {
             {loading ? "Loading incidents…" : `${visibleIncidents.length} of ${incidents.length} incidents shown`}
           </p>
         </div>
-        <button className="v-btn v-btn-primary" onClick={load} disabled={loading}>
+        <button className="v-btn v-btn-primary" onClick={() => load(true)} disabled={loading}>
           {loading ? <span className="v-loading-spinner" /> : <RefreshCw size={16} />}
           Refresh
         </button>

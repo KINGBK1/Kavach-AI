@@ -1,7 +1,6 @@
 import React from "react";
 import "./varunaCommon.css";
-
-export const SEVERITY_ORDER = ["Low", "Moderate", "High", "Critical"];
+import { SEVERITY_ORDER } from "./severityConfig";
 
 const CLASS_BY_SEVERITY = {
   Low: "v-sev-low",

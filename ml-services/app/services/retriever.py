@@ -63,11 +63,11 @@ def _build_query(parsed: dict[str, Any]) -> Any:
     limit = parsed.get("limit") or 10
 
     if intent in {"critical", "top", "recent", "summary", "list"}:
-        base = base.order_by(desc(AnalysisModel.priority_score.nullslast()))
+        base = base.order_by(AnalysisModel.priority_score.desc().nullslast())
     elif intent in {"count", "statistics"}:
-        base = base.order_by(desc(IncidentModel.timestamp.nullslast()))
+        base = base.order_by(IncidentModel.timestamp.desc().nullslast())
     else:
-        base = base.order_by(desc(IncidentModel.timestamp.nullslast()))
+        base = base.order_by(IncidentModel.timestamp.desc().nullslast())
 
     return base.limit(limit)
 

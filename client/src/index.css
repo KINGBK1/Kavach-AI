@@ -65,6 +65,34 @@ html, body {
   flex-direction: column;
 }
 
+.v-fatal-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f8fafc;
+}
+
+.v-fatal-card {
+  width: min(520px, 100%);
+  padding: 28px;
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius-sm);
+  background: var(--v-surface);
+  box-shadow: var(--v-shadow-md);
+}
+
+.v-fatal-card h1 {
+  margin-bottom: 10px;
+  font-size: 1.4rem;
+  color: var(--v-navy);
+}
+
+.v-fatal-card p {
+  margin-bottom: 18px;
+  color: var(--v-text-light);
+}
+
 ::selection {
   color: #fff;
   background: var(--v-primary);

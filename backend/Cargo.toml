@@ -42,3 +42,4 @@ thiserror = "2.0.18"
 # WebSocket
 tokio-tungstenite = "0.29.0"
 futures-util = "0.3"
+api-error = "0.1.8"

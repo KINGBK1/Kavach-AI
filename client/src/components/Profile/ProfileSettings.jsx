@@ -1,7 +1,7 @@
 import React, { useContext } from "react";
 import { LogOut, Mail, Shield } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { AuthContext } from "../Auth/context/AuthContext";
+import { AuthContext } from "../Auth/context/authContextValue";
 import PageShell from "../Layout/PageShell";
 import "./ProfileSettings.css";
 

@@ -8,10 +8,9 @@
 //   POST /chat                 -> { question } -> { answer, relevant_incidents, confidence, model, processing_time_ms }
 //   POST /report               -> { description, latitude, longitude, category } -> AI analysis of the report
 import axios from "axios";
+import { API_BASE_URL } from "../config";
 
-const rawUrl = import.meta.env.VITE_VARUNA_API_URL;
-const trimmedUrl = rawUrl?.replace(/\/+$|\/api$/g, "") || "http://localhost:8000";
-const BASE_URL = `${trimmedUrl}/api`;
+const BASE_URL = API_BASE_URL;
 
 const client = axios.create({
   baseURL: BASE_URL,
@@ -19,14 +18,14 @@ const client = axios.create({
 });
 
 /** GET /incidents — raw deduplicated incidents, no AI analysis */
-export const getIncidents = async () => {
-  const { data } = await client.get("/incidents");
+export const getIncidents = async (limit = 50) => {
+  const { data } = await client.get("/incidents", { params: { limit } });
   return Array.isArray(data) ? data : [];
 };
 
 /** GET /incidents/analyze — AI-analyzed incidents */
-export const getAnalyzedIncidents = async () => {
-  const { data } = await client.get("/incidents/analyze");
+export const getAnalyzedIncidents = async (limit = 10) => {
+  const { data } = await client.get("/incidents/analyze", { params: { limit } });
   return Array.isArray(data) ? data : [];
 };
 
@@ -56,8 +55,19 @@ export const submitReport = async ({ description, latitude, longitude, category 
  * There is no /analyze/dashboard endpoint on the real backend.
  * Build the same shape the Dashboard/Alerts pages expect by combining
  * /incidents and /incidents/analyze on the client.
+ *
+ * Dashboard, LiveMap, and Alerts all call this independently. Without a
+ * shared cache, navigating between those three pages fired 6 backend
+ * requests (2 each) every single time, even for data that was seconds old.
+ * We share one in-flight promise across simultaneous callers and cache the
+ * resolved result for DASHBOARD_CACHE_MS so a page revisit within that
+ * window is instant and makes zero network calls.
  */
-export const getDashboard = async () => {
+const DASHBOARD_CACHE_MS = 60 * 1000; // backend data itself only refreshes every 30 min via the scheduler
+let dashboardCache = null; // { data, fetchedAt }
+let dashboardInFlight = null; // Promise, shared by concurrent callers
+
+const buildDashboard = async () => {
   const [incidents, analyzed] = await Promise.all([
     getIncidents(),
     getAnalyzedIncidents(),
@@ -130,6 +140,37 @@ export const getDashboard = async () => {
     recent_analyses,
     all_incidents: merged,
   };
+};
+
+/**
+ * Cached, deduped entry point used by Dashboard/LiveMap/Alerts.
+ * Pass { force: true } (e.g. from a Refresh button) to bypass the cache.
+ */
+export const getDashboard = async ({ force = false } = {}) => {
+  const isFresh = dashboardCache && Date.now() - dashboardCache.fetchedAt < DASHBOARD_CACHE_MS;
+  if (!force && isFresh) {
+    return dashboardCache.data;
+  }
+
+  if (!force && dashboardInFlight) {
+    return dashboardInFlight;
+  }
+
+  dashboardInFlight = buildDashboard()
+    .then((data) => {
+      dashboardCache = { data, fetchedAt: Date.now() };
+      return data;
+    })
+    .finally(() => {
+      dashboardInFlight = null;
+    });
+
+  return dashboardInFlight;
+};
+
+/** Clears the dashboard cache, e.g. after submitting a new report. */
+export const invalidateDashboardCache = () => {
+  dashboardCache = null;
 };
 
 /**

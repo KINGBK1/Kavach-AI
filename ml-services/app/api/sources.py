@@ -9,6 +9,7 @@ from app.connectors.bluesky import BlueskyConnector
 from app.connectors.firms import FIRMSConnector
 
 from app.services.aggregator import IncidentAggregator
+from app.services.store import get_stored_incidents
 
 router = APIRouter(
     prefix="/sources",
@@ -87,8 +88,11 @@ def firms_hotspots(limit: int = Query(default=20, ge=1, le=100)):
     return incidents[:limit]
 
 @router.get("/all")
-def all_sources():
-
-    service = IncidentAggregator()
-
-    return service.fetch_all()
+def all_sources(limit: int = Query(default=500, ge=1, le=2000)):
+    """
+    Reads incidents from Postgres instead of live-hitting all 7 connectors
+    on every request. The background scheduler (services/scheduler.py) is
+    the only thing that calls IncidentAggregator().fetch_all() now — this
+    endpoint just serves what's already stored.
+    """
+    return get_stored_incidents(limit=limit)

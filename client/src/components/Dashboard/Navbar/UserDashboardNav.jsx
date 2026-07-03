@@ -13,15 +13,14 @@ import {
   ChevronDown,
   Activity,
 } from "lucide-react";
-import { useNavigate, Link, NavLink, useLocation } from "react-router-dom";
-import { AuthContext } from "../../Auth/context/AuthContext"; // Import AuthContext
+import { useNavigate, Link, NavLink } from "react-router-dom";
+import { AuthContext } from "../../Auth/context/authContextValue";
 import "./UserDashboardNav.css";
 import brandLogo from "../../../assets/varuna.png";
 
 const UserDashboardNavbar = ({ user }) => {
   const navigate = useNavigate();
   const { logout } = useContext(AuthContext);
-  const location = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 

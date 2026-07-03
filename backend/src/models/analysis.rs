@@ -14,7 +14,7 @@ pub struct Analysis {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AnalysisResult {
     pub incident_id: String,
-    pub source: String,
+    pub source: Option<String>,
     pub analysis: Analysis,
     pub metadata: AnalysisMetadata,
 }

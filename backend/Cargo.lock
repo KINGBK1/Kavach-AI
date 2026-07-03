@@ -33,6 +33,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
+name = "api-error"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59b63fbf0627e9b4548b2670333db15ed761250a7630b04a68b22198b4d788ba"
+dependencies = [
+ "api-error-derive",
+ "http",
+]
+
+[[package]]
+name = "api-error-derive"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3ff2de1c418b9a8db3f062ab918fb5c478fa0377e048432b46aaaeef72e7a8f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -125,6 +146,7 @@ name = "backend"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api-error",
  "axum",
  "bcrypt",
  "chrono",

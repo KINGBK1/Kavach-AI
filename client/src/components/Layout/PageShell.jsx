@@ -1,7 +1,7 @@
 import React, { useContext } from "react";
 import UserDashboardNavbar from "../Dashboard/Navbar/UserDashboardNav";
 import Footer from "../Footer/Footer";
-import { AuthContext } from "../Auth/context/AuthContext";
+import { AuthContext } from "../Auth/context/authContextValue";
 import "./PageShell.css";
 
 /** Consistent shell used by every authenticated page: navbar, content, footer. */

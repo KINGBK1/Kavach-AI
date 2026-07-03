@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Search, Zap, Plus, X, ExternalLink, AlertCircle } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { getAllSources, getAllAnalyses, analyzeIncident } from "../../api/varunaApi";
-import { SeverityBadge, PriorityScore, SEVERITY_ORDER } from "../common/Severity";
+import { SeverityBadge, PriorityScore } from "../common/Severity";
+import { SEVERITY_ORDER } from "../common/severityConfig";
 import "./Reports.css";
 
 const ManualAnalyzeModal = ({ onClose, onResult }) => {

@@ -1,8 +1,8 @@
 // src/context/AuthContext.jsx
-import React, { createContext, useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Cookies from "js-cookie";
-
-export const AuthContext = createContext();
+import { API_BASE_URL } from "../../../config";
+import { AuthContext } from "./authContextValue";
 
 export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -13,7 +13,7 @@ export const AuthProvider = ({ children }) => {
     const token = Cookies.get("token");
     if (!token) return;
     try {
-      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/auth/status`, {
+      const res = await fetch(`${API_BASE_URL}/auth/health`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,

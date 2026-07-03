@@ -23,10 +23,20 @@ impl AiClient {
             .get(&url)
             .query(&[("limit", limit)])
             .send()
-            .await?
-            .json::<Vec<Value>>()
             .await?;
-        Ok(response)
+
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            return Err(anyhow!("AI service /sources/all failed {}: {}", status, text));
+        }
+
+        let incidents = serde_json::from_str::<Vec<Value>>(&text).map_err(|err| {
+            anyhow!("AI service /sources/all response decode failed: {} - body: {}", err, text)
+        })?;
+
+        Ok(incidents)
     }
 
     pub async fn analyze_incidents(&self, limit: u32) -> Result<Vec<AnalysisResult>> {
@@ -35,10 +45,20 @@ impl AiClient {
             .get(&url)
             .query(&[("limit", limit)])
             .send()
-            .await?
-            .json::<Vec<AnalysisResult>>()
             .await?;
-        Ok(response)
+
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            return Err(anyhow!("AI service /analyze/all failed {}: {}", status, text));
+        }
+
+        let analyses = serde_json::from_str::<Vec<AnalysisResult>>(&text).map_err(|err| {
+            anyhow!("AI service /analyze/all response decode failed: {} - body: {}", err, text)
+        })?;
+
+        Ok(analyses)
     }
 
     pub async fn analyze_single(&self, description: &str, latitude: f64, longitude: f64) -> Result<Value> {
@@ -52,10 +72,20 @@ impl AiClient {
             .post(&url)
             .json(&body)
             .send()
-            .await?
-            .json::<Value>()
             .await?;
-        Ok(response)
+
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            return Err(anyhow!("AI service /analyze failed {}: {}", status, text));
+        }
+
+        let value = serde_json::from_str::<Value>(&text).map_err(|err| {
+            anyhow!("AI service /analyze response decode failed: {} - body: {}", err, text)
+        })?;
+
+        Ok(value)
     }
 
     pub async fn chat(&self, question: &str) -> Result<ChatResponse> {

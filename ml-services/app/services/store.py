@@ -1,8 +1,100 @@
 # services/store.py
 import json
+from datetime import datetime
 from app.core.db import get_conn
 from app.models.incident import Incident
 from app.services.query_parser import COMMON_LOCATIONS
+
+
+def _to_isoformat(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def get_stored_incidents(limit: int = 500) -> list[dict]:
+    """Read incidents straight from Postgres — no live connector calls."""
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, source, title, description, category, latitude, longitude,
+                   severity, timestamp, url, location, country
+            FROM incidents
+            ORDER BY timestamp DESC NULLS LAST
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        rows = cursor.fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "source": row["source"],
+            "title": row["title"],
+            "description": row["description"],
+            "category": row["category"],
+            "latitude": row["latitude"],
+            "longitude": row["longitude"],
+            "severity": row["severity"],
+            "timestamp": _to_isoformat(row["timestamp"]),
+            "url": row["url"],
+            "location": row["location"],
+            "country": row["country"],
+        }
+        for row in rows
+    ]
+
+
+def get_stored_analyses(limit: int = 500) -> list[dict]:
+    """Read incident+analysis pairs straight from Postgres."""
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT a.incident_id, i.source, a.incident_type, a.severity, a.priority_score,
+                   a.confidence, a.summary, a.recommended_actions, a.model,
+                   a.processing_time_ms, a.analyzed_at
+            FROM analyses a
+            JOIN incidents i ON a.incident_id = i.id
+            ORDER BY a.analyzed_at DESC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        rows = cursor.fetchall()
+
+    results = []
+    for row in rows:
+        try:
+            actions = json.loads(row["recommended_actions"]) if row["recommended_actions"] else []
+        except (TypeError, ValueError):
+            actions = []
+        results.append(
+            {
+                "incident_id": row["incident_id"],
+                "source": row["source"],
+                "analysis": {
+                    "incident_type": row["incident_type"],
+                    "severity": row["severity"],
+                    "priority_score": row["priority_score"],
+                    "confidence": row["confidence"],
+                    "summary": row["summary"],
+                    "recommended_actions": actions,
+                },
+                "metadata": {
+                    "model": row["model"],
+                    "processing_time_ms": row["processing_time_ms"],
+                    "analyzed_at": _to_isoformat(row["analyzed_at"]),
+                },
+            }
+        )
+    return results
 
 
 def _infer_location_and_country(incident: Incident) -> tuple[str | None, str | None]:
