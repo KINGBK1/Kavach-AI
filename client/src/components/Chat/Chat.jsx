@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Send, Bot, User as UserIcon, Sparkles } from "lucide-react";
+import { Send, Bot, User as UserIcon, Sparkles, MapPin } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { askAI } from "../../api/varunaApi";
+import { lookUpLocationName } from "../../utils/geolocation";
 import "./Chat.css";
 
 const SUGGESTIONS = [
@@ -21,11 +22,55 @@ const Chat = () => {
   ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [locationNames, setLocationNames] = useState({});
   const scrollRef = useRef(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, sending]);
+
+  useEffect(() => {
+    const incidentsToResolve = [];
+
+    messages.forEach((m) => {
+      if (m.role !== "assistant" || !Array.isArray(m.relevant_incidents)) return;
+      m.relevant_incidents.forEach((incident) => {
+        if (incident && typeof incident === "object") {
+          const lat = incident.latitude ?? incident.lat ?? incident.coordinates?.latitude;
+          const lng = incident.longitude ?? incident.lng ?? incident.coordinates?.longitude;
+          if (lat != null && lng != null) {
+            const key = `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
+            if (!(key in locationNames)) {
+              incidentsToResolve.push({ key, lat, lng });
+            }
+          }
+        }
+      });
+    });
+
+    if (!incidentsToResolve.length) return;
+
+    let active = true;
+    const loadNames = async () => {
+      const newNames = {};
+      await Promise.all(
+        incidentsToResolve.map(async ({ key, lat, lng }) => {
+          const name = await lookUpLocationName(lat, lng);
+          if (active) {
+            newNames[key] = name;
+          }
+        })
+      );
+      if (active) {
+        setLocationNames((prev) => ({ ...prev, ...newNames }));
+      }
+    };
+
+    loadNames();
+    return () => {
+      active = false;
+    };
+  }, [messages, locationNames]);
 
   const send = async (question) => {
     const q = (question ?? input).trim();
@@ -89,10 +134,26 @@ const Chat = () => {
                 {!!m.relevant_incidents?.length && (
                   <div className="v-chat-incidents">
                     {m.relevant_incidents.map((inc, i) => {
-                      const label = typeof inc === 'object' ? (inc.title || inc.incident_id || `Incident ${i}`) : String(inc);
+                      if (inc && typeof inc === 'object') {
+                        const lat = inc.latitude ?? inc.lat ?? inc.coordinates?.latitude;
+                        const lng = inc.longitude ?? inc.lng ?? inc.coordinates?.longitude;
+                        const key = lat != null && lng != null ? `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}` : null;
+                        const locationName = key ? locationNames[key] : null;
+                        const title = inc.title || inc.incident_id || "Incident";
+                        const coords = lat != null && lng != null ? `(${Number(lat).toFixed(3)}, ${Number(lng).toFixed(3)})` : "";
+
+                        return (
+                          <span key={i} className="v-chat-incident-chip">
+                            <MapPin size={12} />
+                            <strong>{title}</strong>
+                            {locationName ? ` — ${locationName}` : coords ? ` — ${coords}` : ""}
+                          </span>
+                        );
+                      }
+
                       return (
                         <span key={i} className="v-chat-incident-chip">
-                          {label}
+                          {String(inc)}
                         </span>
                       );
                     })}

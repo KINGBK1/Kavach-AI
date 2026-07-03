@@ -42,13 +42,18 @@
 .v-chat-row {
   display: flex;
   gap: 14px;
-  max-width: 78%;
+  max-width: 86%;
   opacity: 0;
   animation: v-fadeInUp 0.45s ease forwards;
+  align-items: flex-start;
+}
+.v-chat-row.assistant {
+  align-self: flex-start;
 }
 .v-chat-row.user {
   align-self: flex-end;
   flex-direction: row-reverse;
+  max-width: 78%;
 }
 
 .v-chat-avatar {
@@ -65,7 +70,7 @@
 }
 
 .v-chat-bubble {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.96);
   border-radius: 24px;
   padding: 16px 18px;
   font-size: 0.95rem;
@@ -73,6 +78,9 @@
   color: var(--v-text);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.05);
   border: 1px solid rgba(148,163,184,0.15);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
 }
 .v-chat-row.user .v-chat-bubble {
   background: linear-gradient(135deg, rgba(30,64,175,0.95), rgba(59,130,246,0.95));
@@ -109,7 +117,7 @@
   padding: 10px 14px;
   color: var(--v-primary);
   cursor: pointer;
-  transition: transform 0.18s ease, background 0.18s ease;
+  transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease;
 }
 .v-chat-suggestion-chip:hover { transform: translateY(-1px); background: rgba(59,130,246,0.16); }
 
@@ -139,16 +147,23 @@
 .v-chat-incidents {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 12px;
 }
 .v-chat-incident-chip {
-  font-size: 0.7rem;
-  background: var(--v-surface);
-  border: 1px solid var(--v-border);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  background: rgba(247, 250, 252, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 999px;
-  padding: 3px 9px;
+  padding: 6px 10px;
   color: var(--v-text-light);
+}
+.v-chat-incident-chip strong {
+  font-weight: 600;
+  color: var(--v-text);
 }
 
 .v-chat-typing {
@@ -170,27 +185,6 @@
   0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
   30% { transform: translateY(-4px); opacity: 1; }
 }
-
-.v-chat-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 20px 14px;
-}
-.v-chat-suggestion-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
-  background: var(--v-surface-alt);
-  border: 1px solid var(--v-border);
-  border-radius: 999px;
-  padding: 7px 12px;
-  color: var(--v-text);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.v-chat-suggestion-chip:hover { border-color: var(--v-primary-light); color: var(--v-primary); }
 
 .v-chat-input-row {
   display: flex;

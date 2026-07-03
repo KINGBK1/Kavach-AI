@@ -1,6 +1,6 @@
 // src/services/ai_client.rs
 use reqwest::Client;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde_json::Value;
 use crate::models::analysis::{AnalysisResult, ChatRequest, ChatResponse};
 
@@ -67,10 +67,20 @@ impl AiClient {
             .post(&url)
             .json(&body)
             .send()
-            .await?
-            .json::<ChatResponse>()
             .await?;
-        Ok(response)
+
+        let status = response.status();
+        let text = response.text().await?;
+
+        if !status.is_success() {
+            return Err(anyhow!("AI service chat request failed ({}): {}", status, text));
+        }
+
+        let chat = serde_json::from_str::<ChatResponse>(&text).map_err(|err| {
+            anyhow!("AI service chat response decode failed: {} - body: {}", err, text)
+        })?;
+
+        Ok(chat)
     }
 
     pub async fn get_dashboard(&self) -> Result<Value> {
