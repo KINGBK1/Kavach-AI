@@ -1,10 +1,38 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Zap, Plus, X, ExternalLink, AlertCircle } from "lucide-react";
+import {
+  Search,
+  Zap,
+  Plus,
+  X,
+  ExternalLink,
+  AlertCircle,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Sparkles
+} from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { getAllSources, getAllAnalyses, analyzeIncident } from "../../api/varunaApi";
 import { SeverityBadge, PriorityScore } from "../common/Severity";
 import { SEVERITY_ORDER } from "../common/severityConfig";
 import "./Reports.css";
+
+const SEVERITY_COLORS = {
+  Low: "#16a34a",
+  Moderate: "#ca8a04",
+  High: "#ea580c",
+  Critical: "#dc2626",
+};
+
+const PAGE_SIZE = 25;
+
+const formatDate = (ts) => {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+};
 
 const ManualAnalyzeModal = ({ onClose, onResult }) => {
   const [description, setDescription] = useState("");
@@ -36,10 +64,10 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
 
   return (
     <div className="v-modal-backdrop" onClick={onClose}>
-      <div className="v-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="v-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="v-modal-header">
           <h3>Analyze an incident</h3>
-          <button className="v-modal-close" onClick={onClose}><X size={18} /></button>
+          <button className="v-modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
 
         {!result ? (
@@ -108,6 +136,15 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
   );
 };
 
+const SORT_OPTIONS = [
+  { key: "newest", label: "Newest first" },
+  { key: "oldest", label: "Oldest first" },
+  { key: "severity", label: "Severity (high → low)" },
+  { key: "title", label: "Title (A → Z)" },
+];
+
+const SEVERITY_RANK = { Critical: 3, High: 2, Moderate: 1, Low: 0 };
+
 const Reports = () => {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -115,6 +152,8 @@ const Reports = () => {
   const [search, setSearch] = useState("");
   const [activeSeverities, setActiveSeverities] = useState(new Set(SEVERITY_ORDER));
   const [showModal, setShowModal] = useState(false);
+  const [sortKey, setSortKey] = useState("newest");
+  const [page, setPage] = useState(1);
 
   const [analyzing, setAnalyzing] = useState(false);
   const [freshResults, setFreshResults] = useState(null);
@@ -158,6 +197,7 @@ const Reports = () => {
   };
 
   const toggleSeverity = (sev) => {
+    setPage(1);
     setActiveSeverities((prev) => {
       const next = new Set(prev);
       next.has(sev) ? next.delete(sev) : next.add(sev);
@@ -165,9 +205,17 @@ const Reports = () => {
     });
   };
 
+  const clearFilters = () => {
+    setActiveSeverities(new Set(SEVERITY_ORDER));
+    setSearch("");
+    setPage(1);
+  };
+
+  const hasActiveFilters = activeSeverities.size < SEVERITY_ORDER.length || search.trim().length > 0;
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return sources.filter((s) => {
+    let list = sources.filter((s) => {
       if (!activeSeverities.has(s.severity)) return false;
       if (!q) return true;
       return (
@@ -176,7 +224,56 @@ const Reports = () => {
         s.source?.toLowerCase().includes(q)
       );
     });
-  }, [sources, search, activeSeverities]);
+
+    list = [...list].sort((a, b) => {
+      switch (sortKey) {
+        case "oldest":
+          return new Date(a.timestamp || 0) - new Date(b.timestamp || 0);
+        case "severity":
+          return (SEVERITY_RANK[b.severity] ?? -1) - (SEVERITY_RANK[a.severity] ?? -1);
+        case "title":
+          return (a.title || "").localeCompare(b.title || "");
+        case "newest":
+        default:
+          return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
+      }
+    });
+
+    return list;
+  }, [sources, search, activeSeverities, sortKey]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, currentPage]);
+
+  const severityCounts = useMemo(() => {
+    const out = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
+    sources.forEach((s) => { if (out[s.severity] !== undefined) out[s.severity] += 1; });
+    return out;
+  }, [sources]);
+
+  const exportCsv = () => {
+    const header = ["Severity", "Title", "Category", "Source", "Reported", "URL"];
+    const rows = filtered.map((inc) => [
+      inc.severity || "",
+      (inc.title || "").replace(/"/g, '""'),
+      inc.category || "",
+      inc.source || "",
+      inc.timestamp ? new Date(inc.timestamp).toISOString() : "",
+      inc.url || "",
+    ]);
+    const csv = [header, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kavach-incidents-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <PageShell noFooter>
@@ -212,24 +309,49 @@ const Reports = () => {
         </div>
       )}
 
-      {freshResults && (
-        <div className="v-panel" style={{ marginBottom: 20 }}>
+      {/* Severity overview strip */}
+      <div className="v-severity-summary-strip">
+        {SEVERITY_ORDER.map((sev) => (
+          <div key={sev} className="v-severity-summary-chip" style={{ "--chip-color": SEVERITY_COLORS[sev] }}>
+            <span className="v-severity-summary-dot" />
+            <span className="v-severity-summary-label">{sev}</span>
+            <span className="v-severity-summary-count v-mono">{loading ? "—" : severityCounts[sev]}</span>
+          </div>
+        ))}
+      </div>
+
+      {(analyzing || freshResults) && (
+        <div className="v-panel v-fresh-analysis-panel">
           <div className="v-panel-title">
-            <Zap size={17} /> Fresh analysis results ({freshResults.length})
+            <Sparkles size={16} /> Fresh analysis results {freshResults ? `(${freshResults.length})` : ""}
           </div>
-          <div className="v-critical-grid">
-            {freshResults.map((r) => (
-              <div key={r.incident_id} className={`v-incident-card v-sev-${(r.analysis.severity || "moderate").toLowerCase()} v-critical-card`}>
-                <div className="v-critical-card-top">
-                  <SeverityBadge severity={r.analysis.severity} size="sm" />
-                  <PriorityScore score={r.analysis.priority_score} severity={r.analysis.severity} />
+          {analyzing ? (
+            <div className="v-fresh-analysis-loading">
+              <span className="v-loading-spinner" />
+              <span>Running AI analysis on the latest incidents — this usually takes 30–60 seconds…</span>
+            </div>
+          ) : freshResults.length === 0 ? (
+            <div className="v-empty-state v-empty-state-inline">
+              <p>No new incidents were found to analyze.</p>
+            </div>
+          ) : (
+            <div className="v-critical-grid">
+              {freshResults.map((r) => (
+                <div
+                  key={r.incident_id ?? `${r.source}-${r.analysis?.incident_type}`}
+                  className={`v-incident-card v-sev-${(r.analysis?.severity || "moderate").toLowerCase()} v-critical-card`}
+                >
+                  <div className="v-critical-card-top">
+                    <SeverityBadge severity={r.analysis?.severity} size="sm" />
+                    <PriorityScore score={r.analysis?.priority_score} severity={r.analysis?.severity} />
+                  </div>
+                  <h4 className="v-critical-card-title">{r.analysis?.incident_type}</h4>
+                  <div className="v-critical-card-meta v-mono">{r.source} · {r.incident_id}</div>
+                  <p className="v-critical-card-summary">{r.analysis?.summary}</p>
                 </div>
-                <h4 className="v-critical-card-title">{r.analysis.incident_type}</h4>
-                <div className="v-critical-card-meta v-mono">{r.source} · {r.incident_id}</div>
-                <p className="v-critical-card-summary">{r.analysis.summary}</p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -239,28 +361,60 @@ const Reports = () => {
           <input
             placeholder="Search title, category, source…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
+          {search && (
+            <button className="v-search-clear" onClick={() => setSearch("")} aria-label="Clear search">
+              <X size={14} />
+            </button>
+          )}
         </div>
+
         <div className="v-map-legend">
           {SEVERITY_ORDER.map((sev) => (
             <button
               key={sev}
               className={`v-map-legend-chip ${activeSeverities.has(sev) ? "active" : ""}`}
-              style={{ "--chip-color": { Low: "#16a34a", Moderate: "#eab308", High: "#f97316", Critical: "#dc2626" }[sev] }}
+              style={{ "--chip-color": SEVERITY_COLORS[sev] }}
               onClick={() => toggleSeverity(sev)}
             >
               <span className="v-map-legend-dot" /> {sev}
             </button>
           ))}
         </div>
+
+        <div className="v-toolbar-right-group">
+          <div className="v-sort-select-wrap">
+            <ArrowUpDown size={14} className="v-sort-select-icon" />
+            <select
+              className="v-sort-select"
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value)}
+              aria-label="Sort incidents"
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.key} value={opt.key}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {hasActiveFilters && (
+            <button className="v-btn" onClick={clearFilters}>
+              <X size={14} /> Clear
+            </button>
+          )}
+
+          <button className="v-btn" onClick={exportCsv} disabled={loading || filtered.length === 0}>
+            <Download size={14} /> Export CSV
+          </button>
+        </div>
       </div>
 
       <div className="v-panel v-incidents-table-panel">
-        {(loading || analyzing) && (
+        {(loading) && (
           <div className="v-loading-overlay">
             <span className="v-loading-spinner" />
-            <p>{loading ? "Loading incident list…" : "Running fresh analysis…"}</p>
+            <p>Loading incident list…</p>
           </div>
         )}
         {loading ? (
@@ -269,34 +423,66 @@ const Reports = () => {
           <div className="v-empty-state">
             <h4>No incidents match</h4>
             <p>Try clearing filters or search.</p>
+            {hasActiveFilters && (
+              <button className="v-btn v-btn-primary" onClick={clearFilters} style={{ marginTop: 12 }}>
+                Clear filters
+              </button>
+            )}
           </div>
         ) : (
-          <div className="v-incidents-table">
-            <div className="v-incidents-row v-incidents-head">
-              <span>Severity</span>
-              <span>Title</span>
-              <span>Category</span>
-              <span>Source</span>
-              <span>Reported</span>
-              <span></span>
-            </div>
-            {filtered.map((inc) => (
-              <div key={inc.id} className="v-incidents-row">
-                <SeverityBadge severity={inc.severity} size="sm" />
-                <span className="v-incidents-title">{inc.title}</span>
-                <span className="v-incidents-cell v-mono">{inc.category}</span>
-                <span className="v-incidents-cell v-mono">{inc.source}</span>
-                <span className="v-incidents-cell v-mono">
-                  {inc.timestamp ? new Date(inc.timestamp).toLocaleDateString() : "—"}
-                </span>
-                {inc.url ? (
-                  <a href={inc.url} target="_blank" rel="noopener noreferrer" className="v-incidents-link">
-                    <ExternalLink size={14} />
-                  </a>
-                ) : <span />}
+          <>
+            <div className="v-incidents-table">
+              <div className="v-incidents-row v-incidents-head">
+                <span>Severity</span>
+                <span>Title</span>
+                <span>Category</span>
+                <span>Source</span>
+                <span>Reported</span>
+                <span></span>
               </div>
-            ))}
-          </div>
+              {paginated.map((inc) => (
+                <div key={inc.id} className="v-incidents-row">
+                  <SeverityBadge severity={inc.severity} size="sm" />
+                  <span className="v-incidents-title" title={inc.title}>{inc.title}</span>
+                  <span className="v-incidents-cell v-mono" title={inc.category}>{inc.category}</span>
+                  <span className="v-incidents-cell v-mono" title={inc.source}>{inc.source}</span>
+                  <span className="v-incidents-cell v-mono">{formatDate(inc.timestamp)}</span>
+                  {inc.url ? (
+                    <a href={inc.url} target="_blank" rel="noopener noreferrer" className="v-incidents-link" title="Open source">
+                      <ExternalLink size={14} />
+                    </a>
+                  ) : <span />}
+                </div>
+              ))}
+            </div>
+
+            {totalPages > 1 && (
+              <div className="v-pagination-bar">
+                <span className="v-pagination-info">
+                  Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length}
+                </span>
+                <div className="v-pagination-controls">
+                  <button
+                    className="v-btn v-pagination-btn"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  <span className="v-pagination-page v-mono">{currentPage} / {totalPages}</span>
+                  <button
+                    className="v-btn v-pagination-btn"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    aria-label="Next page"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

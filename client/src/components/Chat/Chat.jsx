@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Send, Bot, User as UserIcon, Sparkles, MapPin } from "lucide-react";
+import { Send, Bot, User as UserIcon, Sparkles, MapPin, Copy, Check, Trash2, RotateCcw } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { askAI } from "../../api/varunaApi";
 import { lookUpLocationName } from "../../utils/geolocation";
@@ -12,18 +12,37 @@ const SUGGESTIONS = [
   "Are there any incidents that need immediate evacuation?",
 ];
 
+const WELCOME_MESSAGE = {
+  role: "assistant",
+  answer:
+    "I'm Kavach. Ask me about current incidents — severity, location, trends, or what needs attention first.",
+};
+
+const CopyButton = ({ text }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API blocked — silently ignore, this is a convenience action.
+    }
+  };
+  return (
+    <button className="v-chat-copy-btn" onClick={handleCopy} title="Copy response" aria-label="Copy response">
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+    </button>
+  );
+};
+
 const Chat = () => {
-  const [messages, setMessages] = useState([
-    {
-      role: "assistant",
-      answer:
-        "I'm Kavach. Ask me about current incidents — severity, location, trends, or what needs attention first.",
-    },
-  ]);
+  const [messages, setMessages] = useState([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [locationNames, setLocationNames] = useState({});
   const scrollRef = useRef(null);
+  const textareaRef = useRef(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -80,10 +99,9 @@ const Chat = () => {
     setSending(true);
     try {
       const result = await askAI(q);
-      // Ensure answer is a string, in case API returns different format
       const normalizedResult = {
         ...result,
-        answer: typeof result.answer === 'string' ? result.answer : JSON.stringify(result.answer || result),
+        answer: typeof result.answer === "string" ? result.answer : JSON.stringify(result.answer || result),
       };
       setMessages((prev) => [...prev, { role: "assistant", ...normalizedResult }]);
     } catch (err) {
@@ -92,9 +110,9 @@ const Chat = () => {
         ...prev,
         {
           role: "assistant",
-          answer:
-            "I couldn't reach the analysis service just now. Check that the backend is running and try again.",
+          answer: "I couldn't reach the analysis service just now. Check that the backend is running and try again.",
           isError: true,
+          failedQuery: q,
         },
       ]);
     } finally {
@@ -102,10 +120,31 @@ const Chat = () => {
     }
   };
 
+  const retryLast = (query) => {
+    // Drop the trailing failed assistant bubble before resending so the
+    // conversation doesn't accumulate duplicate error messages on retry.
+    setMessages((prev) => prev.slice(0, -1));
+    send(query);
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     send();
   };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  };
+
+  const clearConversation = () => {
+    setMessages([WELCOME_MESSAGE]);
+    setLocationNames({});
+  };
+
+  const hasConversation = messages.length > 1;
 
   return (
     <PageShell noFooter>
@@ -114,15 +153,16 @@ const Chat = () => {
           <h1 className="v-dash-title">Ask Kavach</h1>
           <p className="v-dash-subtitle">Natural-language answers grounded in the current incident set.</p>
         </div>
+        {hasConversation && (
+          <div className="v-dash-header-actions">
+            <button className="v-btn" onClick={clearConversation}>
+              <Trash2 size={14} /> Clear conversation
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="v-chat-panel">
-        {sending && (
-          <div className="v-chat-loading-mask">
-            <span className="v-loading-spinner" />
-            <p>Processing your message…</p>
-          </div>
-        )}
         <div className="v-chat-scroll" ref={scrollRef}>
           {messages.map((m, idx) => (
             <div key={idx} className={`v-chat-row ${m.role}`}>
@@ -131,10 +171,17 @@ const Chat = () => {
               </div>
               <div className={`v-chat-bubble ${m.isError ? "error" : ""}`}>
                 <p>{m.answer}</p>
+
+                {m.isError && m.failedQuery && (
+                  <button className="v-chat-retry-btn" onClick={() => retryLast(m.failedQuery)}>
+                    <RotateCcw size={12} /> Retry
+                  </button>
+                )}
+
                 {!!m.relevant_incidents?.length && (
                   <div className="v-chat-incidents">
                     {m.relevant_incidents.map((inc, i) => {
-                      if (inc && typeof inc === 'object') {
+                      if (inc && typeof inc === "object") {
                         const lat = inc.latitude ?? inc.lat ?? inc.coordinates?.latitude;
                         const lng = inc.longitude ?? inc.lng ?? inc.coordinates?.longitude;
                         const key = lat != null && lng != null ? `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}` : null;
@@ -150,7 +197,6 @@ const Chat = () => {
                           </span>
                         );
                       }
-
                       return (
                         <span key={i} className="v-chat-incident-chip">
                           {String(inc)}
@@ -159,12 +205,16 @@ const Chat = () => {
                     })}
                   </div>
                 )}
-                {m.role === "assistant" && m.model && (
-                  <div className="v-chat-meta v-mono">
-                    {m.model} · {(m.confidence * 100).toFixed(0)}% confidence ·{" "}
-                    {(m.processing_time_ms / 1000).toFixed(1)}s
-                  </div>
-                )}
+
+                <div className="v-chat-bubble-footer">
+                  {m.role === "assistant" && m.model && (
+                    <div className="v-chat-meta v-mono">
+                      {m.model} · {(m.confidence * 100).toFixed(0)}% confidence ·{" "}
+                      {(m.processing_time_ms / 1000).toFixed(1)}s
+                    </div>
+                  )}
+                  {m.role === "assistant" && !m.isError && <CopyButton text={m.answer} />}
+                </div>
               </div>
             </div>
           ))}
@@ -189,11 +239,13 @@ const Chat = () => {
         )}
 
         <form className="v-chat-input-row" onSubmit={handleSubmit}>
-          <input
-            type="text"
+          <textarea
+            ref={textareaRef}
+            rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about current incidents…"
+            onKeyDown={handleKeyDown}
+            placeholder="Ask about current incidents… (Enter to send, Shift+Enter for a new line)"
             disabled={sending}
           />
           <button type="submit" className="v-btn v-btn-primary" disabled={sending || !input.trim()}>

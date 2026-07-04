@@ -1,148 +1,157 @@
-.v-chat-panel {
-  position: relative;
-  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(243,246,255,0.98));
-  border: 1px solid rgba(148,163,184,0.25);
-  border-radius: 24px;
-  box-shadow: 0 32px 80px rgba(15, 23, 42, 0.08);
-  display: flex;
-  flex-direction: column;
-  height: 72vh;
-  min-height: 520px;
-  overflow: hidden;
-}
+/* ==========================================================================
+   KAVACH ASK KAVACH — matches UserDashboard light operations theme
+   ========================================================================== */
 
-.v-chat-loading-mask {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  background: rgba(255, 255, 255, 0.94);
+.v-chat-panel {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 24px;
-  text-align: center;
-}
-.v-chat-loading-mask p {
-  margin: 0;
-  color: var(--v-text-light);
-  font-weight: 700;
+  margin: 20px 24px 24px;
+  height: calc(100vh - 180px);
+  min-height: 480px;
+  background: var(--panel-bg, #ffffff);
+  border: 1px solid var(--panel-border, rgba(15, 23, 42, 0.07));
+  border-radius: 20px;
+  box-shadow: var(--panel-shadow, 0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05));
+  overflow: hidden;
+  position: relative;
 }
 
 .v-chat-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 24px 12px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
 }
+
+.v-chat-scroll::-webkit-scrollbar { width: 6px; }
+.v-chat-scroll::-webkit-scrollbar-track { background: transparent; }
+.v-chat-scroll::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.12);
+  border-radius: 99px;
+}
+
+/* ==========================================================================
+   MESSAGE ROWS
+   ========================================================================== */
 
 .v-chat-row {
   display: flex;
-  gap: 14px;
-  max-width: 86%;
-  opacity: 0;
-  animation: v-fadeInUp 0.45s ease forwards;
-  align-items: flex-start;
+  gap: 12px;
+  max-width: 780px;
 }
-.v-chat-row.assistant {
-  align-self: flex-start;
-}
+
 .v-chat-row.user {
-  align-self: flex-end;
   flex-direction: row-reverse;
-  max-width: 78%;
+  align-self: flex-end;
 }
 
 .v-chat-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background: var(--v-surface-alt);
-  color: var(--v-primary);
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+  background: var(--surface-sunken, rgba(15, 23, 42, 0.04));
+  color: var(--text-secondary, #64748b);
+}
+
+.v-chat-row.assistant .v-chat-avatar {
+  background: var(--accent-blue-soft, rgba(37, 99, 235, 0.1));
+  color: var(--accent-blue, #2563eb);
+}
+
+.v-chat-row.user .v-chat-avatar {
+  background: var(--text-primary, #0f172a);
+  color: #ffffff;
 }
 
 .v-chat-bubble {
-  background: rgba(255, 255, 255, 0.96);
-  border-radius: 24px;
-  padding: 16px 18px;
-  font-size: 0.95rem;
-  line-height: 1.6;
-  color: var(--v-text);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.05);
-  border: 1px solid rgba(148,163,184,0.15);
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  background: var(--surface-sunken, rgba(15, 23, 42, 0.03));
+  border: 1px solid var(--panel-border, rgba(15, 23, 42, 0.06));
+  border-radius: 16px;
+  padding: 14px 16px;
   min-width: 0;
 }
+
 .v-chat-row.user .v-chat-bubble {
-  background: linear-gradient(135deg, rgba(30,64,175,0.95), rgba(59,130,246,0.95));
-  color: #fff;
-  border: 1px solid rgba(59,130,246,0.25);
+  background: var(--text-primary, #0f172a);
+  border-color: var(--text-primary, #0f172a);
+  color: #ffffff;
 }
+
+.v-chat-bubble p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-primary, #0f172a);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.v-chat-row.user .v-chat-bubble p { color: #ffffff; }
+
 .v-chat-bubble.error {
-  background: rgba(254, 226, 226, 0.95);
-  color: var(--v-sev-critical);
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.v-chat-bubble.error p { color: #991b1b; }
+
+.v-chat-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  background: #ffffff;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.v-chat-retry-btn:hover { background: #fef2f2; }
+
+.v-chat-bubble-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 .v-chat-meta {
-  margin-top: 10px;
-  font-size: 0.72rem;
-  color: var(--v-text-light);
+  font-size: 10px;
+  color: var(--text-tertiary, #94a3b8);
 }
 
-.v-chat-row.user .v-chat-meta { color: rgba(255,255,255,0.78); }
-
-.v-chat-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 0 24px 18px;
-}
-.v-chat-suggestion-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.82rem;
-  background: rgba(59,130,246,0.08);
-  border: 1px solid rgba(59,130,246,0.18);
-  border-radius: 999px;
-  padding: 10px 14px;
-  color: var(--v-primary);
+.v-chat-copy-btn {
+  background: none;
+  border: none;
+  color: var(--text-tertiary, #94a3b8);
   cursor: pointer;
-  transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease;
-}
-.v-chat-suggestion-chip:hover { transform: translateY(-1px); background: rgba(59,130,246,0.16); }
-
-.v-chat-input-row {
   display: flex;
-  gap: 14px;
-  padding: 18px 24px;
-  border-top: 1px solid rgba(148,163,184,0.18);
-  background: rgba(248,250,252,0.95);
+  align-items: center;
+  padding: 4px;
+  border-radius: 6px;
+  margin-left: auto;
+  transition: all 0.15s ease;
 }
-.v-chat-input-row input {
-  flex: 1;
-  border: 1px solid rgba(148,163,184,0.35);
-  border-radius: var(--v-radius-sm);
-  padding: 14px 16px;
-  font-size: 0.95rem;
-  line-height: 1.5;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-}
-.v-chat-input-row input:focus { border-color: var(--v-primary-light); box-shadow: 0 0 0 4px rgba(59,130,246,0.12); }
 
-@keyframes v-fadeInUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+.v-chat-copy-btn:hover {
+  background: var(--surface-sunken-hover, rgba(15, 23, 42, 0.06));
+  color: var(--text-primary, #0f172a);
 }
+
+/* ==========================================================================
+   RELEVANT INCIDENT CHIPS
+   ========================================================================== */
 
 .v-chat-incidents {
   display: flex;
@@ -150,53 +159,134 @@
   gap: 8px;
   margin-top: 12px;
 }
+
 .v-chat-incident-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 0.75rem;
-  background: rgba(247, 250, 252, 0.95);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 999px;
-  padding: 6px 10px;
-  color: var(--v-text-light);
+  gap: 5px;
+  background: #ffffff;
+  border: 1px solid var(--panel-border, rgba(15, 23, 42, 0.1));
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--text-secondary, #64748b);
 }
+
 .v-chat-incident-chip strong {
+  color: var(--text-primary, #0f172a);
   font-weight: 600;
-  color: var(--v-text);
 }
+
+/* ==========================================================================
+   TYPING INDICATOR
+   ========================================================================== */
 
 .v-chat-typing {
   display: flex;
-  gap: 4px;
   align-items: center;
-  padding: 14px 16px;
+  gap: 5px;
+  padding: 16px;
 }
+
 .v-chat-typing span {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
-  background: var(--v-text-light);
-  animation: v-typing-bounce 1s infinite ease-in-out;
+  border-radius: 99px;
+  background: var(--text-tertiary, #94a3b8);
+  animation: v-typing-bounce 1.2s infinite ease-in-out;
 }
+
 .v-chat-typing span:nth-child(2) { animation-delay: 0.15s; }
 .v-chat-typing span:nth-child(3) { animation-delay: 0.3s; }
+
 @keyframes v-typing-bounce {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
   30% { transform: translateY(-4px); opacity: 1; }
 }
 
+/* ==========================================================================
+   SUGGESTIONS
+   ========================================================================== */
+
+.v-chat-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 24px 16px;
+}
+
+.v-chat-suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-blue-soft, rgba(37, 99, 235, 0.06));
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  color: var(--accent-blue, #2563eb);
+  padding: 8px 14px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.v-chat-suggestion-chip:hover {
+  background: rgba(37, 99, 235, 0.12);
+}
+
+/* ==========================================================================
+   INPUT ROW
+   ========================================================================== */
+
 .v-chat-input-row {
   display: flex;
+  align-items: flex-end;
   gap: 10px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--v-border);
+  padding: 16px 20px;
+  border-top: 1px solid var(--panel-border, rgba(15, 23, 42, 0.08));
+  background: var(--panel-bg, #ffffff);
 }
-.v-chat-input-row input {
+
+.v-chat-input-row textarea {
   flex: 1;
-  border: 1px solid var(--v-border);
-  border-radius: var(--v-radius-sm);
-  padding: 11px 14px;
-  font-size: 0.9rem;
+  min-width: 0;
+  resize: none;
+  max-height: 140px;
+  border: 1px solid var(--panel-border, rgba(15, 23, 42, 0.12));
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+  font-family: inherit;
+  line-height: 1.5;
+  color: var(--text-primary, #0f172a);
+  background: var(--surface-sunken, rgba(15, 23, 42, 0.02));
+  outline: none;
+  transition: border-color 0.15s ease;
 }
-.v-chat-input-row input:focus { border-color: var(--v-primary-light); }
+
+.v-chat-input-row textarea:focus {
+  border-color: var(--accent-blue, #2563eb);
+  background: #ffffff;
+}
+
+.v-chat-input-row textarea:disabled { opacity: 0.6; }
+
+.v-chat-input-row .v-btn-primary {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  border-radius: 14px;
+}
+
+/* ==========================================================================
+   RESPONSIVE
+   ========================================================================== */
+
+@media (max-width: 720px) {
+  .v-chat-panel {
+    margin: 12px 16px 16px;
+    height: calc(100vh - 150px);
+  }
+  .v-chat-row { max-width: 100%; }
+  .v-chat-suggestions { padding: 0 16px 14px; }
+  .v-chat-input-row { padding: 12px 14px; }
+}

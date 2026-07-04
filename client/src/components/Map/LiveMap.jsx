@@ -1,20 +1,49 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
 import { useLocation } from "react-router-dom";
-import { RefreshCw, AlertCircle, ExternalLink, Globe, Maximize2, Minimize2 } from "lucide-react";
+import {
+  RefreshCw,
+  AlertCircle,
+  ExternalLink,
+  Globe,
+  Maximize2,
+  Minimize2,
+  Search,
+  X,
+  Layers,
+  Navigation,
+  Clock
+} from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { getDashboard, invalidateDashboardCache } from "../../api/varunaApi";
 import { SeverityBadge } from "../common/Severity";
 import { SEVERITY_ORDER } from "../common/severityConfig";
-import L from "leaflet";
 import "./LiveMap.css";
 
 const SEVERITY_RADIUS = { Low: 6, Moderate: 8, High: 10, Critical: 13 };
 const SEVERITY_STROKE = {
   Low: "#16a34a",
-  Moderate: "#eab308",
-  High: "#f97316",
+  Moderate: "#ca8a04",
+  High: "#ea580c",
   Critical: "#dc2626",
+};
+
+const BASEMAPS = {
+  streets: {
+    label: "Streets",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "&copy; OpenStreetMap contributors"
+  },
+  satellite: {
+    label: "Satellite",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri"
+  },
+  terrain: {
+    label: "Terrain",
+    url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    attribution: "&copy; OpenTopoMap contributors"
+  }
 };
 
 // Client side geo boundary configurations
@@ -42,7 +71,7 @@ const getOfflineCountry = (lat, lng) => {
   if (lat < 0 && lng > 110 && lng < 180) return "Oceania Region";
   if (lng > -170 && lng < -30) return "Americas Region";
   if (lat < 0 && lng > -20 && lng < 55) return "African Region";
-  
+
   return "International Waters / Other";
 };
 
@@ -56,6 +85,19 @@ const isValidCoordinateRange = (lat, lng) => {
   if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) return false;
   if (Math.abs(lat) < 0.1 && Math.abs(lng) < 0.1) return false;
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+};
+
+const timeAgo = (isoLike) => {
+  if (!isoLike) return "";
+  const then = new Date(isoLike.replace(" ", "T"));
+  if (Number.isNaN(then.getTime())) return "";
+  const diffMs = Date.now() - then.getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
 };
 
 const FlyToIncident = ({ incident }) => {
@@ -78,14 +120,15 @@ const FlyToCenter = ({ center, zoom }) => {
   return null;
 };
 
-/** Component that triggers invalidation recalculation sizes when fullscreen switches toggled */
-const ResizeMapTrigger = ({ isFullscreen }) => {
+/** Recalculates Leaflet's internal size cache after the container's
+ *  dimensions change (fullscreen toggle, sidebar collapse, etc). Without
+ *  this, tiles render into the old container size and leave gray gaps. */
+const ResizeMapTrigger = ({ watch }) => {
   const map = useMap();
   useEffect(() => {
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 200);
-  }, [isFullscreen, map]);
+    const t = setTimeout(() => map.invalidateSize(), 250);
+    return () => clearTimeout(t);
+  }, [watch, map]);
   return null;
 };
 
@@ -101,14 +144,17 @@ const LiveMap = () => {
   const [activeCountries, setActiveCountries] = useState(new Set());
   const [userLocation, setUserLocation] = useState([20, 0]);
   const [locationStatus, setLocationStatus] = useState("prompt");
-  const [locationError, setLocationError] = useState("");
   const [allowGlobal, setAllowGlobal] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [basemap, setBasemap] = useState("streets");
+  const [showLayerMenu, setShowLayerMenu] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedIncident, setSelectedIncident] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const requestLocation = useCallback(() => {
     if (!navigator?.geolocation) {
       setLocationStatus("denied");
-      setLocationError("Geolocation unavailable.");
       return;
     }
     setLocationStatus("requesting");
@@ -117,10 +163,7 @@ const LiveMap = () => {
         setUserLocation([coords.latitude, coords.longitude]);
         setLocationStatus("granted");
       },
-      () => {
-        setLocationStatus("denied");
-        setLocationError("Access to local position disabled.");
-      },
+      () => setLocationStatus("denied"),
       { timeout: 10000, enableHighAccuracy: true }
     );
   }, []);
@@ -130,33 +173,37 @@ const LiveMap = () => {
     locationStatus === "requesting" ||
     (locationStatus === "denied" && !allowGlobal);
 
-const toggleFullscreen = () => {
+  // Single source of truth for entering/exiting fullscreen. We no longer
+  // trust the async .then() to set state — the fullscreenchange listener
+  // below is now the *only* place isFullscreen gets flipped, so state can
+  // never drift out of sync with the real DOM fullscreen element (this
+  // drift was the root cause of the control button disappearing: the
+  // button's visibility/position depended on isFullscreen, and if the
+  // event fired before the promise resolved, or the promise rejected
+  // silently, the two could disagree indefinitely).
+  const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
-      mapFrameRef.current?.requestFullscreen()
-        .then(() => setIsFullscreen(true))
-        .catch(err => console.error("Error enabling fullscreen:", err));
+      mapFrameRef.current?.requestFullscreen?.().catch((err) => {
+        console.error("Error enabling fullscreen:", err);
+      });
     } else {
-      document.exitFullscreen();
-      setIsFullscreen(false);
+      document.exitFullscreen?.();
     }
-  };
+  }, []);
 
-  // Listens directly to standard browser window level changes (including the Escape key)
   useEffect(() => {
     const handleFullscreenChange = () => {
-      const activeElement = document.fullscreenElement || 
-                            document.webkitFullscreenElement || 
-                            document.mozFullScreenElement || 
-                            document.msFullscreenElement;
-      
+      const activeElement =
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement;
       setIsFullscreen(!!activeElement);
     };
-
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
     document.addEventListener("mozfullscreenchange", handleFullscreenChange);
     document.addEventListener("MSFullscreenChange", handleFullscreenChange);
-
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
@@ -165,12 +212,16 @@ const toggleFullscreen = () => {
     };
   }, []);
 
+  // Escape key also exits fullscreen on some browsers without firing a
+  // fullscreenchange event reliably before repaint — keep state in sync.
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+    const handleKey = (e) => {
+      if (e.key === "Escape" && document.fullscreenElement) {
+        document.exitFullscreen?.();
+      }
     };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
   const load = useCallback(async (isRefresh = false) => {
@@ -181,6 +232,7 @@ const toggleFullscreen = () => {
       const data = await getDashboard({ force: isRefresh });
       const list = Array.isArray(data?.all_incidents) ? data.all_incidents : [];
       setIncidents(list);
+      setLastUpdated(new Date());
     } catch (err) {
       setError("Couldn't reach the Kavach analysis service.");
     } finally {
@@ -192,6 +244,12 @@ const toggleFullscreen = () => {
     requestLocation();
     load();
   }, [load, requestLocation]);
+
+  // Auto-refresh every 3 minutes so the map stays live without manual polling.
+  useEffect(() => {
+    const interval = setInterval(() => load(true), 3 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [load]);
 
   const toggleSeverity = (sev) => {
     setActiveSeverities((prev) => {
@@ -210,10 +268,10 @@ const toggleFullscreen = () => {
   };
 
   const processedIncidents = useMemo(() => {
-    return incidents.map(i => ({
+    return incidents.map((i) => ({
       ...i,
       severity: normalizeSeverity(i.severity),
-      country: getOfflineCountry(i.latitude, i.longitude)
+      country: getOfflineCountry(i.latitude, i.longitude),
     }));
   }, [incidents]);
 
@@ -227,14 +285,22 @@ const toggleFullscreen = () => {
     return Object.entries(list).sort((a, b) => b[1] - a[1]);
   }, [processedIncidents]);
 
+  const searchedIncidents = useMemo(() => {
+    if (!searchTerm.trim()) return processedIncidents;
+    const q = searchTerm.trim().toLowerCase();
+    return processedIncidents.filter((i) =>
+      [i.title, i.category, i.source, i.country].filter(Boolean).some((f) => f.toLowerCase().includes(q))
+    );
+  }, [processedIncidents, searchTerm]);
+
   const visibleIncidents = useMemo(() => {
-    return processedIncidents.filter((i) => {
+    return searchedIncidents.filter((i) => {
       const hasValidGeoRange = isValidCoordinateRange(i.latitude, i.longitude);
       const isSeverityActive = activeSeverities.has(i.severity);
       const isCountryActive = activeCountries.size === 0 || activeCountries.has(i.country);
       return hasValidGeoRange && isSeverityActive && isCountryActive;
     });
-  }, [processedIncidents, activeSeverities, activeCountries]);
+  }, [searchedIncidents, activeSeverities, activeCountries]);
 
   const focusIncident = useMemo(
     () => processedIncidents.find((i) => i.id === focusId || i.incident_id === focusId),
@@ -243,13 +309,27 @@ const toggleFullscreen = () => {
 
   const severityCounts = useMemo(() => {
     const out = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
-    processedIncidents.forEach((i) => { 
+    processedIncidents.forEach((i) => {
       if (isValidCoordinateRange(i.latitude, i.longitude)) {
-        if (out[i.severity] !== undefined) out[i.severity] += 1; 
+        if (out[i.severity] !== undefined) out[i.severity] += 1;
       }
     });
     return out;
   }, [processedIncidents]);
+
+  const searchMatchToFly = useMemo(() => {
+    if (!searchTerm.trim() || visibleIncidents.length !== 1) return null;
+    return visibleIncidents[0];
+  }, [searchTerm, visibleIncidents]);
+
+  const clearAllFilters = () => {
+    setActiveSeverities(new Set(SEVERITY_ORDER));
+    setActiveCountries(new Set());
+    setSearchTerm("");
+  };
+
+  const hasActiveFilters =
+    activeCountries.size > 0 || activeSeverities.size < SEVERITY_ORDER.length || searchTerm.trim().length > 0;
 
   return (
     <PageShell noFooter>
@@ -257,20 +337,34 @@ const toggleFullscreen = () => {
         <div>
           <h1 className="v-dash-title">Live Map</h1>
           <p className="v-dash-subtitle">
-            {loading ? "Loading incidents…" : `${visibleIncidents.length} of ${incidents.length} verified incidents shown`}
+            {loading
+              ? "Loading incidents…"
+              : `${visibleIncidents.length} of ${incidents.length} verified incidents shown`}
+            {!loading && lastUpdated && (
+              <span className="v-dash-subtitle-meta">
+                <Clock size={12} /> Updated {timeAgo(lastUpdated.toISOString())}
+              </span>
+            )}
           </p>
         </div>
-        <button className="v-btn v-btn-primary" onClick={() => load(true)} disabled={loading}>
-          {loading ? <span className="v-loading-spinner" /> : <RefreshCw size={16} />}
-          Refresh
-        </button>
+        <div className="v-dash-header-actions">
+          {hasActiveFilters && (
+            <button className="v-btn" onClick={clearAllFilters}>
+              <X size={14} /> Clear filters
+            </button>
+          )}
+          <button className="v-btn v-btn-primary" onClick={() => load(true)} disabled={loading}>
+            {loading ? <span className="v-loading-spinner" /> : <RefreshCw size={16} />}
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
         <div className="v-alert-banner">
           <AlertCircle size={18} />
           <span>{error}</span>
-          <button className="v-btn" onClick={load}>Retry</button>
+          <button className="v-btn" onClick={() => load()}>Retry</button>
         </div>
       )}
 
@@ -286,7 +380,7 @@ const toggleFullscreen = () => {
                 onClick={() => toggleSeverity(sev)}
               >
                 <span className="v-map-legend-dot" />
-                <span className="v-chip-text-label">{sev}</span> 
+                <span className="v-chip-text-label">{sev}</span>
                 <span className="v-chip-count">({severityCounts[sev]})</span>
               </button>
             ))}
@@ -295,10 +389,39 @@ const toggleFullscreen = () => {
 
         <div className="v-panel-col text-left">
           <div className="v-panel-title-wrapper">
-            <span className="v-panel-title">Filter by Country Location</span>
+            <span className="v-panel-title">Search Incidents</span>
+          </div>
+          <div className="v-map-search-box">
+            <Search size={14} className="v-map-search-icon" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Title, category, source, or country…"
+              className="v-map-search-input"
+            />
+            {searchTerm && (
+              <button className="v-map-search-clear" onClick={() => setSearchTerm("")} aria-label="Clear search">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          {searchMatchToFly && (
+            <button
+              className="v-map-search-jump"
+              onClick={() => setSelectedIncident(searchMatchToFly)}
+            >
+              <Navigation size={12} /> Jump to match: {searchMatchToFly.title}
+            </button>
+          )}
+        </div>
+
+        <div className="v-panel-col text-left">
+          <div className="v-panel-title-wrapper">
+            <span className="v-panel-title">Filter by Country</span>
             {activeCountries.size > 0 && (
               <button className="v-panel-reset-btn" onClick={() => setActiveCountries(new Set())}>
-                Reset Selection
+                Reset
               </button>
             )}
           </div>
@@ -318,19 +441,66 @@ const toggleFullscreen = () => {
         </div>
       </div>
 
-      {/* Map Element Container Canvas Frame with React Ref hook bindings */}
+      {/* Map Element Container Canvas Frame */}
       <div className={`v-map-frame ${isFullscreen ? "is-fullscreen" : ""}`} ref={mapFrameRef}>
-        
-        {/* Native Floating UI Fullscreen Trigger Button control element */}
-        <button className="v-map-fullscreen-trigger" onClick={toggleFullscreen} title="Toggle Fullscreen View">
-          {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-        </button>
+
+        {/* Control cluster lives in its own always-on-top overlay layer,
+            independent of Leaflet's internal panes, so it can never be
+            occluded by tile/control z-index changes on fullscreen toggle. */}
+        <div className="v-map-controls-overlay">
+          <button
+            className="v-map-control-btn"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+            aria-label="Toggle fullscreen"
+          >
+            {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+          </button>
+
+          <div className="v-map-layer-switcher">
+            <button
+              className="v-map-control-btn"
+              onClick={() => setShowLayerMenu((v) => !v)}
+              title="Change base map"
+              aria-label="Change base map"
+            >
+              <Layers size={17} />
+            </button>
+            {showLayerMenu && (
+              <div className="v-map-layer-menu">
+                {Object.entries(BASEMAPS).map(([key, cfg]) => (
+                  <button
+                    key={key}
+                    className={`v-map-layer-option ${basemap === key ? "active" : ""}`}
+                    onClick={() => {
+                      setBasemap(key);
+                      setShowLayerMenu(false);
+                    }}
+                  >
+                    {cfg.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {locationStatus === "granted" && (
+            <button
+              className="v-map-control-btn"
+              onClick={() => setUserLocation((loc) => [...loc])}
+              title="Recenter on my location"
+              aria-label="Recenter on my location"
+            >
+              <Navigation size={16} />
+            </button>
+          )}
+        </div>
 
         {(showLocationOverlay || loading) && (
           <div className="v-loading-overlay">
             <span className="v-loading-spinner" />
             <div className="v-overlay-card">
-              <p>{loading ? "Loading map incidents…" : "Allow location access to center map."}</p>
+              <p>{loading ? "Loading map incidents…" : "Allow location access to center the map on you."}</p>
               <div className="v-overlay-actions">
                 {!loading && (
                   <button className="v-btn v-btn-primary" onClick={requestLocation}>
@@ -339,13 +509,14 @@ const toggleFullscreen = () => {
                 )}
                 {!loading && (
                   <button className="v-btn" onClick={() => setAllowGlobal(true)}>
-                    Continue Without Location
+                    Continue without location
                   </button>
                 )}
               </div>
             </div>
           </div>
         )}
+
         <MapContainer
           center={userLocation}
           zoom={locationStatus === "granted" ? 6 : 2}
@@ -355,12 +526,14 @@ const toggleFullscreen = () => {
           preferCanvas={true}
         >
           <TileLayer
-            attribution='&copy; OpenStreetMap contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            key={basemap}
+            attribution={BASEMAPS[basemap].attribution}
+            url={BASEMAPS[basemap].url}
           />
-          <ResizeMapTrigger isFullscreen={isFullscreen} />
+          <ResizeMapTrigger watch={isFullscreen} />
           {locationStatus === "granted" && <FlyToCenter center={userLocation} zoom={6} />}
           {focusIncident && <FlyToIncident incident={focusIncident} />}
+          {selectedIncident && <FlyToIncident incident={selectedIncident} />}
           {visibleIncidents.map((incident) => {
             const currentId = incident.incident_id ?? incident.id;
             return (
@@ -371,7 +544,7 @@ const toggleFullscreen = () => {
                 pathOptions={{
                   color: SEVERITY_STROKE[incident.severity] || "#64748b",
                   fillColor: SEVERITY_STROKE[incident.severity] || "#64748b",
-                  fillOpacity: 0.45,
+                  fillOpacity: 0.5,
                   weight: 1.5,
                 }}
               >
@@ -385,6 +558,9 @@ const toggleFullscreen = () => {
                     <div className="v-map-popup-meta v-mono">
                       {incident.category || "Unknown Category"} · {incident.source || "Unknown Source"}
                     </div>
+                    {incident.analyzed_at && (
+                      <div className="v-map-popup-time v-mono">{timeAgo(incident.analyzed_at)}</div>
+                    )}
                     {incident.description && (
                       <p className="v-map-popup-desc">{incident.description.slice(0, 220)}</p>
                     )}
@@ -393,7 +569,7 @@ const toggleFullscreen = () => {
                     </div>
                     {incident.url && (
                       <a href={incident.url} target="_blank" rel="noopener noreferrer" className="v-map-popup-link">
-                        Source Material <ExternalLink size={12} />
+                        Source material <ExternalLink size={12} />
                       </a>
                     )}
                   </div>
@@ -402,6 +578,17 @@ const toggleFullscreen = () => {
             );
           })}
         </MapContainer>
+
+        {/* Compact always-visible legend, useful once controls/filters are
+            scrolled out of view or the map is fullscreen. */}
+        <div className="v-map-mini-legend">
+          {SEVERITY_ORDER.map((sev) => (
+            <div key={sev} className="v-map-mini-legend-item">
+              <span className="v-map-mini-legend-dot" style={{ backgroundColor: SEVERITY_STROKE[sev] }} />
+              {sev}
+            </div>
+          ))}
+        </div>
       </div>
     </PageShell>
   );
