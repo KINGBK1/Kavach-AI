@@ -12,13 +12,16 @@ import {
   X,
   Layers,
   Navigation,
-  Clock
+  Clock,
+  LocateFixed
 } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { getDashboard, invalidateDashboardCache } from "../../api/varunaApi";
 import { SeverityBadge } from "../common/Severity";
 import { SEVERITY_ORDER } from "../common/severityConfig";
+import ProximityAlertModal from "./ProximityAlertModal";
 import "./LiveMap.css";
+import "./ProximityAlertModal.css";
 
 const SEVERITY_RADIUS = { Low: 6, Moderate: 8, High: 10, Critical: 13 };
 const SEVERITY_STROKE = {
@@ -27,6 +30,13 @@ const SEVERITY_STROKE = {
   High: "#ea580c",
   Critical: "#dc2626",
 };
+
+// How close (km) the user has to be to a High/Critical incident before the
+// proximity alert modal fires.
+const PROXIMITY_ALERT_RADIUS_KM = 15;
+// Only High/Critical incidents trigger the alert — Low/Moderate zones
+// aren't urgent enough to interrupt the user.
+const PROXIMITY_ALERT_SEVERITIES = new Set(["High", "Critical"]);
 
 const BASEMAPS = {
   streets: {
@@ -87,6 +97,21 @@ const isValidCoordinateRange = (lat, lng) => {
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 };
 
+// Haversine distance in km between two lat/lng points — used both for the
+// "nearest incident" proximity check and for the distance shown in the
+// alert modal.
+const distanceKm = (lat1, lng1, lat2, lng2) => {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
 const timeAgo = (isoLike) => {
   if (!isoLike) return "";
   const then = new Date(isoLike.replace(" ", "T"));
@@ -104,7 +129,7 @@ const FlyToIncident = ({ incident }) => {
   const map = useMap();
   useEffect(() => {
     if (incident?.latitude != null && incident?.longitude != null) {
-      map.flyTo([incident.latitude, incident.longitude], 6, { duration: 0.8 });
+      map.flyTo([incident.latitude, incident.longitude], 8, { duration: 0.8 });
     }
   }, [incident, map]);
   return null;
@@ -134,7 +159,13 @@ const ResizeMapTrigger = ({ watch }) => {
 
 const LiveMap = () => {
   const routerLocation = useLocation();
+  // Support both the id-only focus (older callers) and the explicit
+  // lat/lng focus (dashboard "Locate" button) so a focus request always
+  // has real coordinates to fly to, even if the incident list hasn't
+  // finished loading yet or the id doesn't match for some reason.
   const focusId = routerLocation.state?.focusId;
+  const focusLatFromState = routerLocation.state?.focusLat;
+  const focusLngFromState = routerLocation.state?.focusLng;
   const mapFrameRef = useRef(null);
 
   const [incidents, setIncidents] = useState([]);
@@ -152,6 +183,21 @@ const LiveMap = () => {
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
+  // Tracks whether an explicit "focus" navigation (from the dashboard's
+  // Locate button, a search jump, etc.) is in flight. While true, the
+  // GPS-driven FlyToCenter is suppressed so it can't win the race and snap
+  // the map back to the user's own location instead of the incident that
+  // was clicked.
+  const [hasPendingFocus, setHasPendingFocus] = useState(
+    Boolean(focusId || (focusLatFromState != null && focusLngFromState != null))
+  );
+
+  // Proximity alert state
+  const [nearbyZone, setNearbyZone] = useState(null); // { incident, distanceKm }
+  const [dismissedZoneIds, setDismissedZoneIds] = useState(new Set());
+  const [liveUserCoords, setLiveUserCoords] = useState(null);
+  const watchIdRef = useRef(null);
+
   const requestLocation = useCallback(() => {
     if (!navigator?.geolocation) {
       setLocationStatus("denied");
@@ -161,12 +207,37 @@ const LiveMap = () => {
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         setUserLocation([coords.latitude, coords.longitude]);
+        setLiveUserCoords([coords.latitude, coords.longitude]);
         setLocationStatus("granted");
       },
       () => setLocationStatus("denied"),
       { timeout: 10000, enableHighAccuracy: true }
     );
   }, []);
+
+  // Continuously watch the user's position (not just a one-shot fetch) so
+  // the proximity check stays accurate as they move, without needing a
+  // page refresh. This is intentionally separate from requestLocation's
+  // one-shot getCurrentPosition, which only centers the map once.
+  useEffect(() => {
+    if (locationStatus !== "granted" || !navigator?.geolocation) return;
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      ({ coords }) => {
+        setLiveUserCoords([coords.latitude, coords.longitude]);
+      },
+      () => {
+        /* silently ignore watch errors — the one-shot location still stands */
+      },
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
+    );
+
+    return () => {
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
+  }, [locationStatus]);
 
   const showLocationOverlay =
     locationStatus === "prompt" ||
@@ -302,10 +373,30 @@ const LiveMap = () => {
     });
   }, [searchedIncidents, activeSeverities, activeCountries]);
 
-  const focusIncident = useMemo(
-    () => processedIncidents.find((i) => i.id === focusId || i.incident_id === focusId),
-    [processedIncidents, focusId]
-  );
+  // Resolve the incident to fly to: prefer an id match against the loaded
+  // list (gives us the full incident record for the popup), but fall back
+  // to a synthetic incident built directly from the coordinates passed in
+  // router state — this is what fixes "Locate" always landing on your own
+  // position: even if the id lookup misses (list still loading, id shape
+  // mismatch, etc.) we still have real coordinates to fly to.
+  const focusIncident = useMemo(() => {
+    const byId = processedIncidents.find((i) => i.id === focusId || i.incident_id === focusId);
+    if (byId) return byId;
+    if (focusLatFromState != null && focusLngFromState != null) {
+      return {
+        incident_id: focusId || "focus-target",
+        latitude: focusLatFromState,
+        longitude: focusLngFromState,
+      };
+    }
+    return null;
+  }, [processedIncidents, focusId, focusLatFromState, focusLngFromState]);
+
+  useEffect(() => {
+    if (focusIncident) {
+      setHasPendingFocus(true);
+    }
+  }, [focusIncident]);
 
   const severityCounts = useMemo(() => {
     const out = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
@@ -331,8 +422,70 @@ const LiveMap = () => {
   const hasActiveFilters =
     activeCountries.size > 0 || activeSeverities.size < SEVERITY_ORDER.length || searchTerm.trim().length > 0;
 
+  // --- Proximity disaster-zone detection ----------------------------------
+  // Runs whenever the user's live position or the incident list changes.
+  // Finds the nearest High/Critical incident; if it's within the alert
+  // radius and hasn't already been dismissed/shown for this zone, surface
+  // the modal. Moving away and coming back re-triggers it (the dismissed
+  // set is cleared once you leave the radius).
+  useEffect(() => {
+    if (!liveUserCoords || !processedIncidents.length) return;
+
+    const [uLat, uLng] = liveUserCoords;
+    let closest = null;
+    let closestDist = Infinity;
+
+    processedIncidents.forEach((incident) => {
+      if (!PROXIMITY_ALERT_SEVERITIES.has(incident.severity)) return;
+      if (!isValidCoordinateRange(incident.latitude, incident.longitude)) return;
+      const d = distanceKm(uLat, uLng, incident.latitude, incident.longitude);
+      if (d < closestDist) {
+        closestDist = d;
+        closest = incident;
+      }
+    });
+
+    if (!closest || closestDist > PROXIMITY_ALERT_RADIUS_KM) {
+      // User is outside every danger radius — clear dismissal memory so a
+      // future re-entry (to this or another zone) can alert again.
+      if (dismissedZoneIds.size > 0) setDismissedZoneIds(new Set());
+      if (nearbyZone) setNearbyZone(null);
+      return;
+    }
+
+    const zoneKey = closest.incident_id ?? closest.id;
+    if (dismissedZoneIds.has(zoneKey)) return;
+
+    setNearbyZone({ incident: closest, distanceKm: closestDist });
+  }, [liveUserCoords, processedIncidents, dismissedZoneIds, nearbyZone]);
+
+  const dismissProximityAlert = () => {
+    if (nearbyZone?.incident) {
+      const zoneKey = nearbyZone.incident.incident_id ?? nearbyZone.incident.id;
+      setDismissedZoneIds((prev) => new Set(prev).add(zoneKey));
+    }
+    setNearbyZone(null);
+  };
+
+  const viewProximityZoneOnMap = () => {
+    if (nearbyZone?.incident) {
+      setSelectedIncident(nearbyZone.incident);
+      setHasPendingFocus(true);
+    }
+    dismissProximityAlert();
+  };
+
   return (
     <PageShell noFooter>
+      {nearbyZone && (
+        <ProximityAlertModal
+          incident={nearbyZone.incident}
+          distanceKm={nearbyZone.distanceKm}
+          onDismiss={dismissProximityAlert}
+          onViewOnMap={viewProximityZoneOnMap}
+        />
+      )}
+
       <div className="v-dash-header">
         <div>
           <h1 className="v-dash-title">Live Map</h1>
@@ -409,7 +562,10 @@ const LiveMap = () => {
           {searchMatchToFly && (
             <button
               className="v-map-search-jump"
-              onClick={() => setSelectedIncident(searchMatchToFly)}
+              onClick={() => {
+                setSelectedIncident(searchMatchToFly);
+                setHasPendingFocus(true);
+              }}
             >
               <Navigation size={12} /> Jump to match: {searchMatchToFly.title}
             </button>
@@ -487,7 +643,14 @@ const LiveMap = () => {
           {locationStatus === "granted" && (
             <button
               className="v-map-control-btn"
-              onClick={() => setUserLocation((loc) => [...loc])}
+              onClick={() => {
+                // Recentering on "me" is now an explicit focus action too,
+                // so it correctly overrides any pending incident focus and
+                // is the ONLY thing that flies back to the user.
+                setHasPendingFocus(false);
+                setSelectedIncident(null);
+                setUserLocation((loc) => [...loc]);
+              }}
               title="Recenter on my location"
               aria-label="Recenter on my location"
             >
@@ -531,9 +694,54 @@ const LiveMap = () => {
             url={BASEMAPS[basemap].url}
           />
           <ResizeMapTrigger watch={isFullscreen} />
-          {locationStatus === "granted" && <FlyToCenter center={userLocation} zoom={6} />}
-          {focusIncident && <FlyToIncident incident={focusIncident} />}
-          {selectedIncident && <FlyToIncident incident={selectedIncident} />}
+
+          {/* GPS auto-center is suppressed whenever an explicit focus
+              (Locate button, search jump, proximity "View on map") is
+              pending — this is what stops the map snapping back to the
+              user's own position instead of the incident they asked for. */}
+          {locationStatus === "granted" && !hasPendingFocus && (
+            <FlyToCenter center={userLocation} zoom={6} />
+          )}
+          {hasPendingFocus && focusIncident && <FlyToIncident incident={focusIncident} />}
+          {hasPendingFocus && selectedIncident && <FlyToIncident incident={selectedIncident} />}
+
+          {/* User's own live location — a distinct marker + accuracy halo
+              so it's visually obvious which dot is "you" versus incidents. */}
+          {locationStatus === "granted" && liveUserCoords && (
+            <>
+              <CircleMarker
+                center={liveUserCoords}
+                radius={16}
+                pathOptions={{
+                  color: "#2563eb",
+                  fillColor: "#2563eb",
+                  fillOpacity: 0.12,
+                  weight: 0,
+                }}
+              />
+              <CircleMarker
+                center={liveUserCoords}
+                radius={7}
+                pathOptions={{
+                  color: "#ffffff",
+                  fillColor: "#2563eb",
+                  fillOpacity: 1,
+                  weight: 3,
+                }}
+                className="v-user-location-marker"
+              >
+                <Popup>
+                  <div className="v-map-popup">
+                    <strong>Your current location</strong>
+                    <div className="v-map-popup-coords v-mono">
+                      {liveUserCoords[0].toFixed(4)}, {liveUserCoords[1].toFixed(4)}
+                    </div>
+                  </div>
+                </Popup>
+              </CircleMarker>
+            </>
+          )}
+
           {visibleIncidents.map((incident) => {
             const currentId = incident.incident_id ?? incident.id;
             return (
@@ -580,8 +788,15 @@ const LiveMap = () => {
         </MapContainer>
 
         {/* Compact always-visible legend, useful once controls/filters are
-            scrolled out of view or the map is fullscreen. */}
+            scrolled out of view or the map is fullscreen. Includes an
+            entry for "You" so the blue dot is self-explanatory. */}
         <div className="v-map-mini-legend">
+          {locationStatus === "granted" && (
+            <div className="v-map-mini-legend-item">
+              <span className="v-map-mini-legend-dot v-map-mini-legend-you-dot" />
+              <LocateFixed size={11} style={{ marginRight: 2 }} /> You
+            </div>
+          )}
           {SEVERITY_ORDER.map((sev) => (
             <div key={sev} className="v-map-mini-legend-item">
               <span className="v-map-mini-legend-dot" style={{ backgroundColor: SEVERITY_STROKE[sev] }} />

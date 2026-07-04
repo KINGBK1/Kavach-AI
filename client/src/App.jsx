@@ -6,6 +6,8 @@ import UserDashboard from './components/Dashboard/UserDashboard';
 import SignIn from './components/Auth/SignIn/SignIn';
 import Reports from './components/Reports/Reports';
 import { AuthProvider } from './components/Auth/context/AuthContext';
+// Import the ProtectedRoute component (adjust the path if necessary)
+import ProtectedRoute from './components/Auth/ProtectedRoute'; 
 import LiveMap from './components/Map/LiveMap';
 import Alerts from './components/Alerts/Alerts';
 import ProfileSettings from './components/Profile/ProfileSettings';
@@ -64,16 +66,23 @@ const App = () => {
         <AuthProvider>
           <Router>
             <Routes>
+              {/* Public Routes */}
               <Route path="/signup" element={<SignUpPage />} />
               <Route path="/signin" element={<SignIn />} />
+              
+              {/* Root Redirect */}
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<UserDashboard />} />
-              <Route path="/map" element={<LiveMap />} />
-              <Route path="/alerts" element={<Alerts />} />
-              <Route path="/incidents" element={<Reports />} />
+
+              {/* Protected Routes */}
+              <Route path="/dashboard" element={<ProtectedRoute><UserDashboard /></ProtectedRoute>} />
+              <Route path="/map" element={<ProtectedRoute><LiveMap /></ProtectedRoute>} />
+              <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
+              <Route path="/incidents" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+              <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+              <Route path="/profile-settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+              
+              {/* Redirects and Fallbacks */}
               <Route path="/reports" element={<Navigate to="/incidents" replace />} />
-              <Route path="/chat" element={<Chat />} />
-              <Route path="/profile-settings" element={<ProfileSettings />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </Router>

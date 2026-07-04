@@ -115,3 +115,170 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Append these rules to Alerts.css */
+
+.v-dash-subtitle-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* --- Summary cards: info icon + 4th "unacknowledged" card -------------- */
+.v-alert-summary-card span {
+  display: inline-flex;
+  align-items: center;
+}
+
+.v-alert-summary-card.ack strong {
+  color: #0f172a;
+}
+
+/* --- Toolbar: search, sort, filter chips, export ------------------------ */
+.v-alerts-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.v-toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.v-toggle-chip.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #2563eb;
+}
+
+.v-toggle-chip-count {
+  background: rgba(37, 99, 235, 0.15);
+  color: #2563eb;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+/* --- Mute / sound toggle button ----------------------------------------- */
+.v-dash-header-actions .v-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- Alert row: new-alert flash + acknowledged dimming ------------------ */
+.v-alert-row {
+  position: relative;
+  transition: box-shadow 0.3s ease, opacity 0.3s ease;
+}
+
+.v-alert-row-flash {
+  animation: v-alert-flash-glow 1.6s ease-in-out 2;
+}
+
+@keyframes v-alert-flash-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+  50% { box-shadow: 0 0 0 5px rgba(220, 38, 38, 0.18); }
+}
+
+.v-alert-new-pill {
+  position: absolute;
+  top: -9px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  box-shadow: 0 4px 10px rgba(220, 38, 38, 0.35);
+}
+
+.v-alert-row-acked {
+  opacity: 0.55;
+}
+
+.v-alert-row-acked:hover {
+  opacity: 0.85;
+}
+
+/* --- Meta line: reported time + coordinates ----------------------------- */
+.v-alert-row-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+
+.v-alert-row-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* --- Expand/collapse recommended actions -------------------------------- */
+.v-alert-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 4px 0;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.v-alert-expand-toggle:hover {
+  text-decoration: underline;
+}
+
+.v-alert-expand-icon-open {
+  transform: rotate(180deg);
+  transition: transform 0.15s ease;
+}
+
+/* --- Row action buttons -------------------------------------------------- */
+.v-alert-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.v-alert-row-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 6px 11px;
+  text-decoration: none;
+}
+
+.v-alert-ack-btn.acked {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #16a34a;
+}

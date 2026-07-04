@@ -1,0 +1,91 @@
+/* src/components/common/InfoTooltip.css */
+
+.v-info-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+}
+
+.v-info-tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0;
+  line-height: 0;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.v-info-tooltip-trigger:hover,
+.v-info-tooltip-trigger:focus-visible {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+  outline: none;
+}
+
+/* Rendered via portal into document.body with position: fixed, so it is
+   never constrained by an ancestor card's overflow/width and can be
+   clamped purely against the viewport (see InfoTooltip.jsx computePosition). */
+.v-info-tooltip-bubble {
+  position: fixed;
+  z-index: 3000;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+}
+
+/* Placement: bottom = bubble sits below the trigger, arrow points up.
+   Placement: top = bubble sits above the trigger (and is shifted up by
+   its own height via transform), arrow points down. */
+.v-info-tooltip-bubble.v-info-tooltip-top {
+  transform: translateY(-100%);
+}
+
+.v-info-tooltip-bubble::before {
+  content: "";
+  position: absolute;
+  left: var(--arrow-left, 16px);
+  width: 10px;
+  height: 10px;
+  background: #0f172a;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.v-info-tooltip-bubble.v-info-tooltip-bottom::before {
+  top: -5px;
+}
+
+.v-info-tooltip-bubble.v-info-tooltip-top::before {
+  bottom: -5px;
+}
+
+.v-info-tooltip-title {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #ffffff;
+}
+
+.v-info-tooltip-bubble p {
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .v-info-tooltip-bubble {
+    width: 200px !important;
+  }
+}

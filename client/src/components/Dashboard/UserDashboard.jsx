@@ -24,9 +24,9 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  ScatterChart,
-  Scatter,
-  ZAxis,
+  BarChart,
+  Bar,
+  Legend,
   PieChart,
   Pie,
   Cell
@@ -35,6 +35,7 @@ import PageShell from "../Layout/PageShell";
 import { getDashboard } from "../../api/varunaApi";
 import { lookUpLocationName } from "../../utils/geolocation";
 import { SeverityBadge } from "../common/Severity";
+import InfoTooltip from "../common/InfoTooltip";
 import "./UserDashboard.css";
 
 // Cap the number of individually-colored donut slices / legend rows so the
@@ -58,10 +59,13 @@ const SEVERITY_COLORS = {
 const resolveSeverityColor = (severity) =>
   SEVERITY_COLORS[severity?.toLowerCase()] || SEVERITY_COLORS.unknown;
 
-const StatCard = ({ label, value, loading, icon: Icon, trend }) => (
+const StatCard = ({ label, value, loading, icon: Icon, trend, info }) => (
   <div className="v-premium-kpi-card">
     <div className="v-kpi-header">
-      <span className="v-kpi-label">{label}</span>
+      <span className="v-kpi-label">
+        {label}
+        {info && <InfoTooltip text={info} title={label} />}
+      </span>
       {Icon && (
         <div className="v-kpi-icon-glow">
           <Icon size={16} className="v-kpi-icon" />
@@ -187,6 +191,10 @@ const UserDashboard = () => {
   const sourceBreakdown = data?.source_breakdown || {};
   const criticalIncidents = data?.top_critical_incidents || [];
   const recentAnalyses = data?.recent_analyses || [];
+  // Full incident set (same field LiveMap consumes) — this is what the
+  // scatter plot below needs so it represents everything in the DB, not
+  // just the handful of items in the "recent" feed.
+  const allIncidents = data?.all_incidents || [];
 
   // Category distribution, capped to the top N with the remainder grouped
   // into a single "Other" row so long backend lists stay scannable.
@@ -252,21 +260,54 @@ const UserDashboard = () => {
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [recentAnalyses]);
 
-  const scatterDensityData = useMemo(() => {
-    return recentAnalyses.map((item, index) => {
-      const incidentDate = new Date(item.analyzed_at?.replace(" ", "T") || Date.now());
-      const hourOfDay = Number.isNaN(incidentDate.getTime()) ? index % 24 : incidentDate.getHours();
-      return {
-        hour: hourOfDay,
-        score: item.priority_score || 0,
-        title: item.title || "Untitled incident",
-        severity: item.severity || "unknown",
-        source: item.source || "System Stream",
-        summary: item.summary || "No supplemental details recorded.",
-        category: item.category || "General Threat"
-      };
+  // --- Incidents by hour, split by severity -------------------------------
+  // The previous bubble scatter (size = count, y = avg priority score,
+  // color = severity) was unreadable: color barely showed at small bubble
+  // sizes, low-priority incidents all collapsed onto a flat line near
+  // y=0, and there was no way to read "how many" or "how severe" at a
+  // glance. A stacked bar chart is the standard, legible way to show this:
+  // one bar per hour of day, height = total incidents in that hour, and
+  // the bar is divided into colored segments for Critical/High/Moderate/Low
+  // so both volume AND severity mix are visible immediately, for the full
+  // incident set (not just a small "recent" sample).
+  const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
+  const SEVERITY_KEYS = ["Critical", "High", "Moderate", "Low"];
+
+  const hourlySeverityData = useMemo(() => {
+    const source = allIncidents.length ? allIncidents : recentAnalyses;
+    if (!source.length) return [];
+
+    // One row per hour, pre-seeded so every hour appears even with 0 incidents.
+    const rows = HOUR_LABELS.map((label, hour) => ({
+      hour,
+      label,
+      Critical: 0,
+      High: 0,
+      Moderate: 0,
+      Low: 0,
+      total: 0
+    }));
+
+    source.forEach((item) => {
+      const rawDate = item.analyzed_at || item.timestamp;
+      const incidentDate = new Date((rawDate || "").replace(" ", "T") || Date.now());
+      const hourOfDay = Number.isNaN(incidentDate.getTime()) ? 0 : incidentDate.getHours();
+      const rawSeverity = (item.severity || "").toLowerCase();
+      const severityKey =
+        SEVERITY_KEYS.find((s) => s.toLowerCase() === rawSeverity) || "Low";
+
+      rows[hourOfDay][severityKey] += 1;
+      rows[hourOfDay].total += 1;
     });
-  }, [recentAnalyses]);
+
+    return rows;
+  }, [allIncidents, recentAnalyses]);
+
+  const totalHourlyIncidents = hourlySeverityData.reduce((sum, r) => sum + r.total, 0);
+  const peakHourRow = hourlySeverityData.reduce(
+    (peak, row) => (row.total > (peak?.total ?? -1) ? row : peak),
+    null
+  );
 
   const priorityDistributionData = useMemo(() => {
     const total = Object.values(severityBreakdown).reduce((a, b) => a + b, 0) || 1;
@@ -276,6 +317,39 @@ const UserDashboard = () => {
       percentage: ((val / total) * 100).toFixed(0)
     }));
   }, [severityBreakdown]);
+
+  // --- Action button handlers --------------------------------------------
+  // Previously "Open" / "Locate" / "Analyze" had no onClick of their own,
+  // so clicks bubbled up to the parent card's handler (which navigates to
+  // /map with the same focusId regardless of which button was pressed).
+  // Each button now does something distinct and stops propagation so it
+  // doesn't also trigger the card's own click.
+  const handleOpenIncident = (e, incident) => {
+    e.stopPropagation();
+    if (incident.url) {
+      window.open(incident.url, "_blank", "noopener,noreferrer");
+    } else {
+      navigate("/map", { state: { focusId: incident.incident_id } });
+    }
+  };
+
+  const handleLocateIncident = (e, incident) => {
+    e.stopPropagation();
+    navigate("/map", {
+      state: {
+        focusId: incident.incident_id,
+        // Explicit coordinates so the map can fly straight there even if
+        // the id lookup in LiveMap's incident list momentarily misses.
+        focusLat: incident.latitude,
+        focusLng: incident.longitude
+      }
+    });
+  };
+
+  const handleAnalyzeIncident = (e, incident) => {
+    e.stopPropagation();
+    navigate("/reports", { state: { analyzeId: incident.incident_id } });
+  };
 
   return (
     <PageShell>
@@ -327,11 +401,42 @@ const UserDashboard = () => {
 
         {/* KPI Row */}
         <div className="v-premium-kpi-grid">
-          <StatCard label="TOTAL INCIDENTS TRACKED" value={summary.total_incidents ?? "0"} loading={loading} icon={TrendingUp} trend="+12.4%" />
-          <StatCard label="CRITICAL THREATS ISOLATED" value={severityBreakdown.Critical ?? "0"} loading={loading} icon={ShieldAlert} />
-          <StatCard label="CONNECTED NETWORK SOURCES" value={Object.keys(sourceBreakdown).length ?? "0"} loading={loading} icon={Radio} />
-          <StatCard label="AI ANALYSIS EFFICIENCY" value={summary.total_analyzed != null ? `${summary.total_analyzed} units` : "—"} loading={loading} icon={Zap} />
-          <StatCard label="AVG PRIORITY VECTOR" value={summary.average_priority_score != null ? summary.average_priority_score.toFixed(1) : "—"} loading={loading} icon={Siren} />
+          <StatCard
+            label="TOTAL INCIDENTS TRACKED"
+            value={summary.total_incidents ?? "0"}
+            loading={loading}
+            icon={TrendingUp}
+            trend="+12.4%"
+            info="Every incident Varuna has ingested from all connected sources, regardless of severity or whether it's been AI-analyzed yet."
+          />
+          <StatCard
+            label="CRITICAL THREATS ISOLATED"
+            value={severityBreakdown.Critical ?? "0"}
+            loading={loading}
+            icon={ShieldAlert}
+            info="Incidents the AI classified as Critical severity — the highest urgency tier, requiring immediate attention."
+          />
+          <StatCard
+            label="CONNECTED NETWORK SOURCES"
+            value={Object.keys(sourceBreakdown).length ?? "0"}
+            loading={loading}
+            icon={Radio}
+            info="Number of distinct data feeds (news APIs, sensor networks, alert systems, etc.) currently reporting incidents."
+          />
+          <StatCard
+            label="AI ANALYSIS EFFICIENCY"
+            value={summary.total_analyzed != null ? `${summary.total_analyzed} units` : "—"}
+            loading={loading}
+            icon={Zap}
+            info="How many raw incident reports have been fully processed by the AI analysis pipeline (severity scored, categorized, actions generated)."
+          />
+          <StatCard
+            label="AVG PRIORITY VECTOR"
+            value={summary.average_priority_score != null ? summary.average_priority_score.toFixed(1) : "—"}
+            loading={loading}
+            icon={Siren}
+            info="The average priority score (0-100) across all analyzed incidents. Higher means the overall incident pool skews more urgent right now."
+          />
         </div>
 
         {/* Trend + Source attribution */}
@@ -340,6 +445,10 @@ const UserDashboard = () => {
             <div className="v-card-header-context">
               <Activity size={15} className="v-panel-icon" />
               <h3>Incident chronology trend</h3>
+              <InfoTooltip
+                title="Incident chronology trend"
+                text="Counts how many incidents from the live feed were logged in each time-of-day bucket (HH:MM). A rising area means incidents are being reported more frequently around that time."
+              />
             </div>
             <div className="v-chart-container-fixed">
               {loading ? (
@@ -356,11 +465,13 @@ const UserDashboard = () => {
                       </linearGradient>
                     </defs>
                     <XAxis dataKey="time" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={{ stroke: "#e2e8f0" }} />
-                    <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={{ stroke: "#e2e8f0" }} allowDecimals={false} />
+                    <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={{ stroke: "#e2e8f0" }} allowDecimals={false} label={{ value: "Incidents", angle: -90, position: "insideLeft", fontSize: 10, fill: "#94a3b8" }} />
                     <Tooltip
                       contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", borderRadius: "12px", boxShadow: "0 8px 24px rgba(15,23,42,0.12)" }}
                       labelStyle={{ color: "#64748b", fontWeight: 600, fontSize: 12 }}
                       itemStyle={{ color: "#0f172a", fontSize: 12 }}
+                      formatter={(value) => [`${value} incident${value === 1 ? "" : "s"}`, "Logged"]}
+                      labelFormatter={(label) => `Time: ${label}`}
                     />
                     <Area type="monotone" dataKey="count" stroke="#2563eb" strokeWidth={2} fillOpacity={1} fill="url(#trendGradient)" />
                   </AreaChart>
@@ -373,6 +484,10 @@ const UserDashboard = () => {
             <div className="v-card-header-context">
               <Crosshair size={15} className="v-panel-icon" />
               <h3>Telemetry source attribution</h3>
+              <InfoTooltip
+                title="Telemetry source attribution"
+                text="Breaks down which data source reported each incident (news wires, sensor feeds, citizen reports, etc.). Slice size = share of total incidents from that source. The smallest sources are grouped into 'Other'."
+              />
             </div>
             <div className="v-chart-container-fixed">
               {loading ? (
@@ -401,6 +516,7 @@ const UserDashboard = () => {
                         <Tooltip
                           contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", borderRadius: "10px", boxShadow: "0 8px 24px rgba(15,23,42,0.12)" }}
                           itemStyle={{ color: "#0f172a", fontSize: 12 }}
+                          formatter={(value, name) => [`${value} incidents`, name]}
                         />
                       </PieChart>
                     </ResponsiveContainer>
@@ -420,6 +536,10 @@ const UserDashboard = () => {
             <div className="v-card-header-context">
               <Compass size={15} className="v-panel-icon" />
               <h3>Category distribution</h3>
+              <InfoTooltip
+                title="Category distribution"
+                text="Shows what TYPE of incidents make up the feed (e.g. flood, fire, storm, civil unrest). Bar length and % = share of all incidents in that category. Only the top 10 categories are listed individually; the rest are grouped under 'Other'."
+              />
             </div>
             <div className="v-chart-container-fixed custom-scroll-panel">
               {loading ? (
@@ -451,6 +571,10 @@ const UserDashboard = () => {
             <div className="v-card-header-context">
               <Layers size={15} className="v-panel-icon" />
               <h3>Critical vector risk volumes</h3>
+              <InfoTooltip
+                title="Critical vector risk volumes"
+                text="A single bar split proportionally by severity level (Low / Moderate / High / Critical). Segment width = what fraction of all incidents fall in that severity tier right now."
+              />
             </div>
             <div className="v-chart-container-fixed flex-center">
               {loading ? (
@@ -487,53 +611,69 @@ const UserDashboard = () => {
           </div>
         </div>
 
-        {/* Priority vs time scatter */}
+        {/* Incidents by hour, stacked by severity */}
         <div className="v-premium-chart-card large-fullwidth">
           <div className="v-card-header-context">
             <Terminal size={15} className="v-panel-icon" />
-            <h3>Priority vector vs. timeline mapping</h3>
+            <h3>Incidents by hour &amp; severity</h3>
+            <InfoTooltip
+              title="Incidents by hour & severity"
+              text={`Every incident in the database (${totalHourlyIncidents ? totalHourlyIncidents.toLocaleString() : "—"} total) grouped into the 24 hours of the day it was logged. Each bar's HEIGHT is how many incidents happened that hour; the colored segments show the severity mix (red = Critical, orange = High, yellow = Moderate, green = Low). Hover a bar for the exact breakdown.`}
+            />
+            {!loading && totalHourlyIncidents > 0 && (
+              <span className="v-chart-count-pill v-mono">
+                {totalHourlyIncidents.toLocaleString()} incidents ·{" "}
+                {peakHourRow ? `peak at ${peakHourRow.label}` : ""}
+              </span>
+            )}
           </div>
           <div className="v-chart-container-fixed">
             {loading ? (
               <div className="v-premium-skeleton full-height" />
-            ) : scatterDensityData.length === 0 ? (
+            ) : hourlySeverityData.length === 0 ? (
               <div className="v-empty-chart-fallback">No analysis events in this window</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart margin={{ top: 20, right: 30, bottom: 10, left: -20 }}>
-                  <XAxis type="number" dataKey="hour" name="Hour" unit=":00" domain={[0, 23]} stroke="#94a3b8" tickLine={false} axisLine={{ stroke: "#e2e8f0" }} fontSize={11} />
-                  <YAxis type="number" dataKey="score" name="Priority Vector" domain={[0, 100]} stroke="#94a3b8" tickLine={false} axisLine={{ stroke: "#e2e8f0" }} fontSize={11} />
-                  <ZAxis type="number" range={[90, 400]} />
+                <BarChart data={hourlySeverityData} margin={{ top: 20, right: 20, bottom: 10, left: -10 }}>
+                  <XAxis
+                    dataKey="label"
+                    stroke="#94a3b8"
+                    tickLine={false}
+                    axisLine={{ stroke: "#e2e8f0" }}
+                    fontSize={10.5}
+                    interval={1}
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    tickLine={false}
+                    axisLine={{ stroke: "#e2e8f0" }}
+                    fontSize={11}
+                    allowDecimals={false}
+                    label={{ value: "Incidents", angle: -90, position: "insideLeft", fontSize: 10, fill: "#94a3b8" }}
+                  />
                   <Tooltip
-                    cursor={{ strokeDasharray: "3 3", stroke: "rgba(15,23,42,0.15)" }}
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const item = payload[0].payload;
-                        const sevColor = resolveSeverityColor(item.severity);
-                        return (
-                          <div className="v-premium-bubble-tooltip">
-                            <div className="v-tooltip-head" style={{ borderLeft: `3px solid ${sevColor}`, paddingLeft: 8 }}>
-                              <h4>{item.title}</h4>
-                              <span className="v-tooltip-pill" style={{ backgroundColor: `${sevColor}1a`, color: sevColor }}>{item.severity}</span>
-                            </div>
-                            <div className="v-tooltip-body-meta">
-                              <p><strong>Source:</strong> {item.source} &nbsp;•&nbsp; <strong>Category:</strong> {item.category}</p>
-                              <p><strong>Score:</strong> {item.score} &nbsp;•&nbsp; Logged at {item.hour}:00</p>
-                              <p className="v-tooltip-desc-summary">{item.summary}</p>
-                            </div>
-                          </div>
-                        );
-                      }
-                      return null;
+                    cursor={{ fill: "rgba(148,163,184,0.12)" }}
+                    contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", borderRadius: "12px", boxShadow: "0 8px 24px rgba(15,23,42,0.12)" }}
+                    labelStyle={{ color: "#0f172a", fontWeight: 700, fontSize: 12.5, marginBottom: 4 }}
+                    formatter={(value, name) => [`${value} incident${value === 1 ? "" : "s"}`, name]}
+                    labelFormatter={(label, payload) => {
+                      const total = payload?.[0]?.payload?.total ?? 0;
+                      return `${label} — ${total} incident${total === 1 ? "" : "s"} total`;
                     }}
                   />
-                  <Scatter name="Threat Matrices" data={scatterDensityData}>
-                    {scatterDensityData.map((entry, index) => {
-                      const color = resolveSeverityColor(entry.severity);
-                      return <Cell key={`cell-${index}`} fill={color} fillOpacity={0.55} stroke={color} strokeWidth={1.5} />;
-                    })}
-                  </Scatter>
-                </ScatterChart>
+                  <Legend
+                    verticalAlign="top"
+                    align="right"
+                    height={32}
+                    iconType="circle"
+                    iconSize={9}
+                    wrapperStyle={{ fontSize: 12 }}
+                  />
+                  <Bar dataKey="Critical" stackId="sev" fill={resolveSeverityColor("critical")} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="High" stackId="sev" fill={resolveSeverityColor("high")} />
+                  <Bar dataKey="Moderate" stackId="sev" fill={resolveSeverityColor("moderate")} />
+                  <Bar dataKey="Low" stackId="sev" fill={resolveSeverityColor("low")} radius={[4, 4, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
             )}
           </div>
@@ -567,7 +707,7 @@ const UserDashboard = () => {
                       key={incident.incident_id}
                       className="v-wallet-linear-card"
                       style={{ "--edge-glow": sevColor }}
-                      onClick={() => navigate("/map", { state: { focusId: incident.incident_id } })}
+                      onClick={() => navigate("/map", { state: { focusId: incident.incident_id, focusLat: incident.latitude, focusLng: incident.longitude } })}
                     >
                       <div className="v-wallet-card-backlight" />
                       <div className="v-wallet-inner-layout">
@@ -611,13 +751,23 @@ const UserDashboard = () => {
                           </div>
 
                           <div className="v-card-interactive-buttons">
-                            <button className="v-card-btn-action tertiary">
+                            <button
+                              className="v-card-btn-action tertiary"
+                              onClick={(e) => handleOpenIncident(e, incident)}
+                            >
                               <Eye size={12} /> <span>Open</span>
                             </button>
-                            <button className="v-card-btn-action tertiary">
+                            <button
+                              className="v-card-btn-action tertiary"
+                              onClick={(e) => handleLocateIncident(e, incident)}
+                            >
                               <MapPin size={12} /> <span>Locate</span>
                             </button>
-                            <button className="v-card-btn-action primary-glow" style={{ color: sevColor }}>
+                            <button
+                              className="v-card-btn-action primary-glow"
+                              style={{ color: sevColor }}
+                              onClick={(e) => handleAnalyzeIncident(e, incident)}
+                            >
                               <Zap size={12} /> <span>Analyze</span>
                             </button>
                           </div>

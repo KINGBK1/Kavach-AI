@@ -609,3 +609,21 @@
   .v-dash-header-actions { width: 100%; }
   .v-dash-header-actions .v-btn { flex: 1; justify-content: center; }
 }
+
+/* Append these rules to LiveMap.css */
+
+/* Pulsing halo on the user's own location marker so it reads as "live"
+   and is visually distinct from static incident markers. */
+.v-user-location-marker path {
+  animation: v-user-marker-pulse 2s ease-in-out infinite;
+}
+
+@keyframes v-user-marker-pulse {
+  0%, 100% { filter: drop-shadow(0 0 0 rgba(37, 99, 235, 0.6)); }
+  50% { filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.9)); }
+}
+
+.v-map-mini-legend-you-dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}

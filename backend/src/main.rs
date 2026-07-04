@@ -1,5 +1,5 @@
 use axum::{
-    http::{header, Method}, // Added header import here
+    http::{header,HeaderValue, Method}, 
     Router,
 };
 use tower_http::{
@@ -74,10 +74,26 @@ async fn main() {
 
     // Strict CORS configuration matching exact credentials requirements
     let cors = CorsLayer::new()
-        .allow_origin("http://localhost:5173".parse::<axum::http::HeaderValue>().unwrap())
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
-        .allow_credentials(true);
+        .allow_origin([
+            "http://localhost:5173"
+            .parse::<HeaderValue>()
+            .unwrap(),
+        "https://kavach-ai-lemon.vercel.app"
+            .parse::<HeaderValue>()
+            .unwrap(),
+    ])
+    .allow_methods([
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::OPTIONS,
+    ])
+    .allow_headers([
+        header::AUTHORIZATION,
+        header::CONTENT_TYPE,
+    ])
+    .allow_credentials(true);
 
     let app = Router::new()
         .nest("/api", routes::create_router(state))

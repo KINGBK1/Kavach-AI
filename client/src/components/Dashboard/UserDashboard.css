@@ -1066,3 +1066,27 @@ body {
   .v-card-interactive-buttons { justify-content: stretch; }
   .v-card-btn-action { flex: 1; justify-content: center; }
 }
+
+/* Append these rules to UserDashboard.css */
+
+.v-kpi-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.v-card-header-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.v-chart-count-pill {
+  margin-left: auto;
+  font-size: 11px;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}

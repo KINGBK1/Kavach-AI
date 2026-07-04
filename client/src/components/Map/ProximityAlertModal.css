@@ -1,0 +1,158 @@
+/* src/components/LiveMap/ProximityAlertModal.css */
+
+.v-proximity-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+  animation: v-proximity-fade-in 0.2s ease;
+}
+
+@keyframes v-proximity-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.v-proximity-modal {
+  position: relative;
+  background: #ffffff;
+  border-radius: 20px;
+  max-width: 420px;
+  width: 100%;
+  padding: 28px 24px 22px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.4);
+  border-top: 5px solid #dc2626;
+  animation: v-proximity-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.v-proximity-sev-critical { border-top-color: #dc2626; }
+.v-proximity-sev-high { border-top-color: #ea580c; }
+.v-proximity-sev-moderate { border-top-color: #ca8a04; }
+.v-proximity-sev-low { border-top-color: #16a34a; }
+
+@keyframes v-proximity-pop-in {
+  from { opacity: 0; transform: scale(0.94) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.v-proximity-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: #f1f5f9;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.v-proximity-modal-close:hover {
+  background: #e2e8f0;
+}
+
+.v-proximity-modal-icon-ring {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+  animation: v-proximity-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes v-proximity-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.25); }
+  50% { box-shadow: 0 0 0 12px rgba(220, 38, 38, 0); }
+}
+
+.v-proximity-modal-title {
+  font-size: 19px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 6px;
+}
+
+.v-proximity-modal-subtitle {
+  font-size: 13.5px;
+  color: #475569;
+  margin: 0 0 18px;
+  line-height: 1.5;
+}
+
+.v-proximity-modal-incident-card {
+  text-align: left;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+
+.v-proximity-modal-incident-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.v-proximity-sev-chip {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+}
+.v-proximity-sev-chip.v-proximity-sev-critical { background: #fee2e2; color: #dc2626; }
+.v-proximity-sev-chip.v-proximity-sev-high { background: #ffedd5; color: #ea580c; }
+.v-proximity-sev-chip.v-proximity-sev-moderate { background: #fef9c3; color: #ca8a04; }
+.v-proximity-sev-chip.v-proximity-sev-low { background: #dcfce7; color: #16a34a; }
+
+.v-proximity-modal-category {
+  font-size: 11.5px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.v-proximity-modal-incident-card h4 {
+  margin: 0 0 4px;
+  font-size: 14.5px;
+  color: #0f172a;
+}
+
+.v-proximity-modal-desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.v-proximity-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.v-proximity-modal-footnote {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0;
+}
