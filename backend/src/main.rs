@@ -1,9 +1,9 @@
 use axum::{
-    http::Method,
+    http::{header, Method}, // Added header import here
     Router,
 };
 use tower_http::{
-    cors::{Any, CorsLayer},
+    cors::CorsLayer,
     trace::TraceLayer,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -72,15 +72,12 @@ async fn main() {
         google_client_id,
     ));
 
+    // Strict CORS configuration matching exact credentials requirements
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::DELETE,
-        ])
-        .allow_headers(Any);
+        .allow_origin("http://localhost:5173".parse::<axum::http::HeaderValue>().unwrap())
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .allow_credentials(true);
 
     let app = Router::new()
         .nest("/api", routes::create_router(state))

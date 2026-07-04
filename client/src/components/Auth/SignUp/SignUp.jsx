@@ -22,7 +22,7 @@ const SignUpPage = () => {
   const navigate = useNavigate();
   const { login } = useContext(AuthContext);
   const [userType, setUserType] = useState("");
-  
+
   // ✅ All state declarations at the top level
   const [formData, setFormData] = useState({
     entityId: "",
@@ -37,7 +37,7 @@ const SignUpPage = () => {
     specializations: "",
     termsAccepted: false,
   });
-  
+
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
@@ -66,6 +66,11 @@ const SignUpPage = () => {
       );
     }
   }, []);
+
+  const handleGoogleError = (error) => {
+    console.error("Google Authentication Handshake Failed:", error);
+    showMessage("Google Sign-In was blocked or cancelled. Please check your browser configuration.", "error");
+  };
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -107,15 +112,15 @@ const SignUpPage = () => {
       if (userType === 'ngo') {
         payload.email = formData.email;
         payload.phone = formData.phone;
-        
+
         const [lat, lng] = formData.location.split(',').map(s => parseFloat(s.trim()));
-        
+
         payload.ngoDetails = {
           organizationName: formData.organizationName,
           registrationNumber: formData.entityId,
           serviceRadius: parseInt(formData.serviceRadius) || 50000,
-          specializations: formData.specializations 
-            ? formData.specializations.split(',').map(s => s.trim()) 
+          specializations: formData.specializations
+            ? formData.specializations.split(',').map(s => s.trim())
             : [],
           emergencyContact: formData.phone,
           coordinates: { lat, lng }
@@ -128,7 +133,7 @@ const SignUpPage = () => {
       );
 
       setUserName(res.data.user?.name || formData.organizationName || formData.username || "New User");
-      
+
       if (userType === 'ngo') {
         alert("NGO account created successfully! Your account is pending admin approval. You will receive an email notification once approved.");
         navigate('/signin');
@@ -267,11 +272,11 @@ const SignUpPage = () => {
   // ✅ Main render function for form fields
   const renderSpecificFields = () => {
     const isUser = userType === "user";
-    
+
     if (userType === 'ngo') {
       return renderNGOFields();
     }
-    
+
     const entityIdPlaceholder = {
       admin: "Admin ID",
       ddmo: "DDMO Official ID",
@@ -372,15 +377,15 @@ const SignUpPage = () => {
 
   const isFormValid = () => {
     if (!userType || !formData.termsAccepted) return false;
-    
+
     if (userType === 'ngo') {
-      return formData.entityId.trim() !== "" && 
-             formData.email.trim() !== "" && 
-             formData.organizationName.trim() !== "";
+      return formData.entityId.trim() !== "" &&
+        formData.email.trim() !== "" &&
+        formData.organizationName.trim() !== "";
     }
-    
+
     if (userType !== "user" && formData.entityId.trim() === "") return false;
-    
+
     if (userType === "user") {
       if (
         formData.username.trim() === "" ||
@@ -479,7 +484,9 @@ const SignUpPage = () => {
                 <div className="google-btn-wrapper">
                   <GoogleLogin
                     onSuccess={handleGoogleSuccess}
-                    onError={() => alert("Google login failed")}
+                    onError={handleGoogleError}
+                    useOneTap={false}
+                    state_cookie_domain="localhost" // <-- Explicitly locks the initialization domain context
                   />
                 </div>
               </div>

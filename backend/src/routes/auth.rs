@@ -1,292 +1,298 @@
 // src/routes/auth.rs
+//
+// Migrated from the old Node/Express `server/controllers/authController.js`.
+// Handles local (username/password) auth, Google Sign-In, and account status.
+
 use axum::{
-    extract::State,
-    http::{HeaderMap, StatusCode},
-    routing::{get, post},
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{get, patch, post},
     Json, Router,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::models::user::{
-    AuthResponse, GoogleLoginRequest, LoginRequest, RegisterRequest, UserResponse,
+    AuthResponse, GoogleLoginRequest, LoginRequest, PublicUser, RegisterRequest,
 };
-use crate::services::auth as auth_service;
+use crate::repository::users::UserRepository;
+use crate::services::auth_extractor::AuthUser;
+use crate::services::{google_auth, jwt};
 use crate::state::AppState;
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/ping", get(ping))
         .route("/register", post(register))
         .route("/login", post(login))
         .route("/google-login", post(google_login))
+        .route("/status", get(status))
+        .route("/approve/{id}", patch(approve_user))
         .with_state(state)
 }
 
-/// Extracts a bearer token from the `Authorization` header, if present.
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-}
-
-/// Health check. Also doubles as a lightweight "who am I" endpoint: if a
-/// valid bearer token is supplied, the current user is included in the
-/// response (this is what the frontend's `AuthContext` polls on load).
-async fn health(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Json<Value> {
-    let mut body = json!({
+async fn health() -> Json<Value> {
+    Json(json!({
         "status": "healthy",
         "service": "VARUNA Rust Backend",
         "version": "1.0.0"
-    });
-
-    if let Some(token) = bearer_token(&headers) {
-        if let Ok(claims) = auth_service::verify_token(token, &state.jwt_secret) {
-            if let Ok(Some(user)) = state
-                .users
-                .find_by_id(claims.sub.parse().unwrap_or_default())
-                .await
-            {
-                let user_response: UserResponse = user.into();
-                body["user"] = json!(user_response);
-            }
-        }
-    }
-
-    Json(body)
-}
-
-/// Username/password registration.
-async fn register(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<RegisterRequest>,
-) -> Result<Json<AuthResponse>, (StatusCode, Json<Value>)> {
-    if payload.username.trim().is_empty() {
-        return Err(bad_request("Username is required"));
-    }
-
-    let is_official = payload.role != "user";
-    if is_official && payload.official_id.as_deref().unwrap_or("").is_empty() {
-        return Err(bad_request("Official ID is required for this role"));
-    }
-
-    let password = if is_official {
-        None
-    } else {
-        match payload.password.as_deref() {
-            Some(p) if !p.is_empty() => Some(p),
-            _ => return Err(bad_request("Password is required for regular users")),
-        }
-    };
-
-    if let Some(email) = payload.email.as_deref() {
-        if state
-            .users
-            .find_by_email(email)
-            .await
-            .map_err(internal_error)?
-            .is_some()
-        {
-            return Err(bad_request("Email already registered"));
-        }
-    }
-
-    if state
-        .users
-        .find_by_username(&payload.username)
-        .await
-        .map_err(internal_error)?
-        .is_some()
-    {
-        return Err(bad_request("Username already taken"));
-    }
-
-    // Officials/NGOs/DDMO accounts require admin approval before they can log in.
-    let is_approved = !is_official;
-
-    let password_hash = match password {
-        Some(p) => auth_service::hash_password(p).map_err(internal_error)?,
-        // Officials without a password (approval-gated accounts) get a
-        // random, unusable hash placeholder until password auth is added
-        // for them separately.
-        None => auth_service::hash_password(&uuid::Uuid::new_v4().to_string())
-            .map_err(internal_error)?,
-    };
-
-    let user = state
-        .users
-        .create_local_user(
-            &payload.username,
-            payload.email.as_deref(),
-            &password_hash,
-            &payload.role,
-            payload.location.as_deref(),
-            payload.phone.as_deref(),
-            payload.official_id.as_deref(),
-            is_approved,
-        )
-        .await
-        .map_err(internal_error)?;
-
-    if !user.is_approved {
-        return Ok(Json(AuthResponse {
-            token: String::new(),
-            user: user.into(),
-        }));
-    }
-
-    let token = auth_service::issue_token(&user, &state.jwt_secret).map_err(internal_error)?;
-    Ok(Json(AuthResponse {
-        token,
-        user: user.into(),
     }))
 }
 
-/// Username/password login.
+async fn ping() -> Json<Value> {
+    Json(json!({ "message": "Pong" }))
+}
+
+fn err(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<Value>) {
+    (status, Json(json!({ "message": message.into() })))
+}
+
+// ---------------------------------------------------------------------
+// Register (local signup)
+// ---------------------------------------------------------------------
+async fn register(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RegisterRequest>,
+) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+    let repo = UserRepository::new(state.db.clone());
+
+    if payload.username.trim().is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "Username is required"));
+    }
+
+    let official_id = payload.resolved_official_id();
+
+    if payload.role != "user" && official_id.as_deref().unwrap_or("").is_empty() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Official ID is required for this role",
+        ));
+    }
+
+    if payload.role == "user" && payload.password.as_deref().unwrap_or("").is_empty() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Password is required for regular users",
+        ));
+    }
+
+    if let Some(email) = payload.email.as_deref() {
+        if repo
+            .find_by_email(email)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+            .is_some()
+        {
+            return Err(err(StatusCode::BAD_REQUEST, "Email already registered"));
+        }
+    }
+
+    if repo
+        .find_by_username(&payload.username)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+        .is_some()
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "Username already taken"));
+    }
+
+    let password_hash = match payload.password.as_deref() {
+        Some(pw) => Some(
+            bcrypt::hash(pw, bcrypt::DEFAULT_COST)
+                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash password"))?,
+        ),
+        None => None,
+    };
+
+    let is_approved = payload.role == "user";
+
+    let user = repo
+        .create_local_user(
+            &payload.username,
+            payload.email.as_deref(),
+            password_hash.as_deref(),
+            &payload.role,
+            official_id.as_deref(),
+            payload.location.as_deref(),
+            payload.phone.as_deref(),
+            payload.ngo_details.as_ref(),
+            is_approved,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Register error: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        })?;
+
+    if user.role != "user" {
+        return Ok((
+            StatusCode::CREATED,
+            Json(json!({
+                "message": "Account created. Awaiting admin approval.",
+                "user": PublicUser::from(user)
+            })),
+        ));
+    }
+
+    let token = jwt::generate_token(user.id, &user.role, &state.jwt_secret)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to generate token"))?;
+
+    let response = AuthResponse {
+        token,
+        user: user.into(),
+    };
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::to_value(response).unwrap_or_else(|_| json!({}))),
+    ))
+}
+
+// ---------------------------------------------------------------------
+// Local login
+// ---------------------------------------------------------------------
 async fn login(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<Value>)> {
-    let user = state
-        .users
-        .find_by_username(&payload.username)
-        .await
-        .map_err(internal_error)?
-        .ok_or_else(|| not_found("User not found"))?;
-
-    if !user.is_approved {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({ "message": "Account pending admin approval" })),
+    if payload.username.is_empty() || payload.password.is_empty() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Username and password are required",
         ));
     }
 
-    let hash = user
-        .password_hash
-        .as_deref()
-        .ok_or_else(|| bad_request("This account has no password set. Try Google sign-in."))?;
+    let repo = UserRepository::new(state.db.clone());
 
-    let matches = auth_service::verify_password(&payload.password, hash).map_err(internal_error)?;
-    if !matches {
-        return Err(bad_request("Invalid credentials"));
+    let user = repo
+        .find_by_username(&payload.username)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
+
+    if !user.is_approved {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Account pending admin approval",
+        ));
     }
 
-    let token = auth_service::issue_token(&user, &state.jwt_secret).map_err(internal_error)?;
+    let matches = match user.password_hash.as_deref() {
+        Some(hash) => bcrypt::verify(&payload.password, hash).unwrap_or(false),
+        None => false,
+    };
+
+    if !matches {
+        return Err(err(StatusCode::BAD_REQUEST, "Invalid credentials"));
+    }
+
+    repo.touch_last_login(user.id).await.ok();
+
+    let token = jwt::generate_token(user.id, &user.role, &state.jwt_secret)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to generate token"))?;
+
     Ok(Json(AuthResponse {
         token,
         user: user.into(),
     }))
 }
 
-/// Google Sign-In: verifies the ID token issued by Google Identity Services
-/// on the frontend, then finds-or-creates the corresponding local user and
-/// issues our own JWT for subsequent API calls.
+// ---------------------------------------------------------------------
+// Google login/signup (regular users only, mirrors old behavior)
+// ---------------------------------------------------------------------
 async fn google_login(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<GoogleLoginRequest>,
 ) -> Result<Json<AuthResponse>, (StatusCode, Json<Value>)> {
-    let info = auth_service::verify_google_id_token(
-        &state.http_client,
-        &payload.token,
-        &state.google_client_id,
-    )
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "message": format!("Google authentication failed: {e}") })),
-        )
-    })?;
+    if state.google_client_id.is_empty() {
+        return Err(err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Google login is not configured on the server",
+        ));
+    }
 
-    // 1) Already linked to this Google account -> just log them in.
-    if let Some(user) = state
-        .users
-        .find_by_google_id(&info.sub)
+    let claims = google_auth::verify_id_token(&payload.token, &state.google_client_id)
         .await
-        .map_err(internal_error)?
+        .map_err(|e| {
+            tracing::warn!("Google token verification failed: {e:?}");
+            err(StatusCode::UNAUTHORIZED, "Google authentication failed")
+        })?;
+
+    let repo = UserRepository::new(state.db.clone());
+
+    let user = match repo
+        .find_by_google_id(&claims.sub)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
     {
-        let token = auth_service::issue_token(&user, &state.jwt_secret).map_err(internal_error)?;
-        return Ok(Json(AuthResponse {
-            token,
-            user: user.into(),
-        }));
-    }
+        Some(existing) => existing,
+        None => {
+            let display_name = claims
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("user_{}", &claims.sub[..8.min(claims.sub.len())]));
 
-    // 2) An account with this email already exists (e.g. created via
-    //    password signup) -> link the Google id to it instead of creating
-    //    a duplicate account.
-    if let Some(email) = info.email.as_deref() {
-        if let Some(existing) = state.users.find_by_email(email).await.map_err(internal_error)? {
-            let linked = state
-                .users
-                .attach_google_id(existing.id, &info.sub, info.picture.as_deref())
-                .await
-                .map_err(internal_error)?;
-            let token =
-                auth_service::issue_token(&linked, &state.jwt_secret).map_err(internal_error)?;
-            return Ok(Json(AuthResponse {
-                token,
-                user: linked.into(),
-            }));
+            repo.create_google_user(
+                &claims.sub,
+                claims.email.as_deref(),
+                &display_name,
+                claims.picture.as_deref(),
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to create Google user: {e:?}");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create account")
+            })?
         }
-    }
+    };
 
-    // 3) Brand new user -> create an account. Derive a unique username
-    //    from their Google profile since Kavach usernames must be unique.
-    let base_username = info
-        .name
-        .clone()
-        .or_else(|| info.email.clone())
-        .unwrap_or_else(|| format!("google_{}", &info.sub[..8.min(info.sub.len())]));
-    let username = format!(
-        "{}_{}",
-        slugify(&base_username),
-        &info.sub[..6.min(info.sub.len())]
-    );
+    repo.touch_last_login(user.id).await.ok();
 
-    let user = state
-        .users
-        .create_google_user(
-            &info.sub,
-            info.email.as_deref(),
-            info.name.as_deref(),
-            info.picture.as_deref(),
-            &username,
-        )
-        .await
-        .map_err(internal_error)?;
+    let token = jwt::generate_token(user.id, &user.role, &state.jwt_secret)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to generate token"))?;
 
-    let token = auth_service::issue_token(&user, &state.jwt_secret).map_err(internal_error)?;
     Ok(Json(AuthResponse {
         token,
         user: user.into(),
     }))
 }
 
-fn slugify(input: &str) -> String {
-    input
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect::<String>()
+// ---------------------------------------------------------------------
+// Current session status (requires Authorization: Bearer <jwt>)
+// ---------------------------------------------------------------------
+async fn status(AuthUser(user): AuthUser) -> Json<Value> {
+    Json(json!({
+        "success": true,
+        "user": PublicUser::from(user)
+    }))
 }
 
-fn bad_request(message: &str) -> (StatusCode, Json<Value>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({ "message": message })),
-    )
-}
+// ---------------------------------------------------------------------
+// Approve a pending NGO/DDMO/Admin account (admin only)
+// ---------------------------------------------------------------------
+async fn approve_user(
+    State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if current_user.role != "admin" {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Access denied. Required roles: admin",
+        ));
+    }
 
-fn not_found(message: &str) -> (StatusCode, Json<Value>) {
-    (StatusCode::NOT_FOUND, Json(json!({ "message": message })))
-}
+    let repo = UserRepository::new(state.db.clone());
+    let user = repo
+        .set_approved(id, true)
+        .await
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
 
-fn internal_error(err: anyhow::Error) -> (StatusCode, Json<Value>) {
-    tracing::error!("auth error: {err:#}");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "message": "Internal server error" })),
-    )
+    Ok(Json(json!({
+        "message": "User approved",
+        "user": PublicUser::from(user)
+    })))
 }
