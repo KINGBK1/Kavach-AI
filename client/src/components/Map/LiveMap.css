@@ -1,3 +1,4 @@
+/* Base Layout Component Variables & Container */
 .v-filter-dashboard-panel {
   display: flex;
   gap: 24px;
@@ -60,6 +61,7 @@
   text-decoration: underline;
 }
 
+/* Severity Legend */
 .v-map-legend {
   display: flex;
   flex-wrap: wrap;
@@ -100,6 +102,7 @@
   background: var(--chip-color);
 }
 
+/* Country Layout Controls Grid */
 .v-country-wrap-grid {
   display: flex;
   flex-wrap: wrap;
@@ -167,6 +170,7 @@
   color: #1d4ed8;
 }
 
+/* Map Window Framing Canvas Setup */
 .v-map-frame {
   position: relative;
   height: 62vh;
@@ -174,6 +178,7 @@
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid #e2e8f0;
+  width: 100%;
 }
 
 .v-loading-overlay {
@@ -209,6 +214,7 @@
   justify-content: center;
 }
 
+/* Leaflet Popups Style Engine */
 .leaflet-popup-content-wrapper {
   border-radius: 8px !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
@@ -216,6 +222,7 @@
 
 .v-map-popup {
   min-width: 220px;
+  max-width: 280px;
 }
 
 .v-map-popup h4 {
@@ -265,4 +272,63 @@
   color: #2563eb;
   font-weight: 600;
   text-decoration: none;
+}
+
+/* ==========================================
+   BREAKPOINTS: Tablets & Small Displays (< 1024px)
+   ========================================== */
+@media (max-width: 1024px) {
+  .v-filter-dashboard-panel {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .v-panel-col:first-child {
+    border-right: none;
+    border-bottom: 1px solid #f1f5f9;
+    padding-right: 0;
+    padding-bottom: 16px;
+  }
+}
+
+/* ==========================================
+   BREAKPOINTS: Smart Phones & Mobile Portals (< 640px)
+   ========================================== */
+@media (max-width: 640px) {
+  .v-filter-dashboard-panel {
+    padding: 12px;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+
+  .v-map-legend {
+    gap: 6px;
+  }
+
+  .v-map-legend-chip {
+    padding: 5px 10px;
+    font-size: 0.75rem;
+  }
+
+  .v-country-wrap-grid {
+    max-height: 110px; /* Expands height slightly on mobile since rows take up more space */
+    gap: 4px;
+  }
+
+  .v-country-badge {
+    padding: 3px 6px;
+    font-size: 0.72rem;
+  }
+
+  .v-map-frame {
+    height: 50vh; /* Shorter relative length on smartphones to preserve vertical reading flows */
+    min-height: 320px;
+    border-radius: 8px;
+  }
+  
+  /* Make Popups view friendly on constrained width screens */
+  .v-map-popup {
+    min-width: 180px;
+    max-width: 220px;
+  }
 }

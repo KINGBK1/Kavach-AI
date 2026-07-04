@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
 import { useLocation } from "react-router-dom";
-import { RefreshCw, AlertCircle, ExternalLink, Globe } from "lucide-react";
+import { RefreshCw, AlertCircle, ExternalLink, Globe, Maximize2, Minimize2 } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { getDashboard, invalidateDashboardCache } from "../../api/varunaApi";
 import { SeverityBadge } from "../common/Severity";
@@ -17,7 +17,7 @@ const SEVERITY_STROKE = {
   Critical: "#dc2626",
 };
 
-// High-speed offline bounding boxes for instantaneous client-side lookup
+// Client side geo boundary configurations
 const GEO_BOUNDS = [
   { country: "India", latMin: 6.5, latMax: 35.5, lngMin: 68.0, lngMax: 97.4 },
   { country: "United States", latMin: 24.5, latMax: 49.4, lngMin: -124.8, lngMax: -66.9 },
@@ -37,7 +37,6 @@ const getOfflineCountry = (lat, lng) => {
   const match = GEO_BOUNDS.find(b => lat >= b.latMin && lat <= b.latMax && lng >= b.lngMin && lng <= b.lngMax);
   if (match) return match.country;
 
-  // Broad macro-region fallbacks based on global hemispheres if specific country isn't matched
   if (lat > 0 && lng > 60 && lng < 150) return "Asia-Pacific Region";
   if (lat > 20 && lng > -30 && lng < 60) return "Europe & Middle East";
   if (lat < 0 && lng > 110 && lng < 180) return "Oceania Region";
@@ -55,7 +54,7 @@ const normalizeSeverity = (sev) => {
 
 const isValidCoordinateRange = (lat, lng) => {
   if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) return false;
-  if (Math.abs(lat) < 0.1 && Math.abs(lng) < 0.1) return false; // Exclude mock 0,0 items
+  if (Math.abs(lat) < 0.1 && Math.abs(lng) < 0.1) return false;
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 };
 
@@ -79,9 +78,21 @@ const FlyToCenter = ({ center, zoom }) => {
   return null;
 };
 
+/** Component that triggers invalidation recalculation sizes when fullscreen switches toggled */
+const ResizeMapTrigger = ({ isFullscreen }) => {
+  const map = useMap();
+  useEffect(() => {
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
+  }, [isFullscreen, map]);
+  return null;
+};
+
 const LiveMap = () => {
   const routerLocation = useLocation();
   const focusId = routerLocation.state?.focusId;
+  const mapFrameRef = useRef(null);
 
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -92,11 +103,12 @@ const LiveMap = () => {
   const [locationStatus, setLocationStatus] = useState("prompt");
   const [locationError, setLocationError] = useState("");
   const [allowGlobal, setAllowGlobal] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const requestLocation = useCallback(() => {
     if (!navigator?.geolocation) {
       setLocationStatus("denied");
-      setLocationError("Geolocation is unavailable.");
+      setLocationError("Geolocation unavailable.");
       return;
     }
     setLocationStatus("requesting");
@@ -105,9 +117,9 @@ const LiveMap = () => {
         setUserLocation([coords.latitude, coords.longitude]);
         setLocationStatus("granted");
       },
-      (err) => {
+      () => {
         setLocationStatus("denied");
-        setLocationError("Unable to access local position.");
+        setLocationError("Access to local position disabled.");
       },
       { timeout: 10000, enableHighAccuracy: true }
     );
@@ -118,7 +130,50 @@ const LiveMap = () => {
     locationStatus === "requesting" ||
     (locationStatus === "denied" && !allowGlobal);
 
-const load = useCallback(async (isRefresh = false) => {
+const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      mapFrameRef.current?.requestFullscreen()
+        .then(() => setIsFullscreen(true))
+        .catch(err => console.error("Error enabling fullscreen:", err));
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  };
+
+  // Listens directly to standard browser window level changes (including the Escape key)
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const activeElement = document.fullscreenElement || 
+                            document.webkitFullscreenElement || 
+                            document.mozFullScreenElement || 
+                            document.msFullscreenElement;
+      
+      setIsFullscreen(!!activeElement);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const load = useCallback(async (isRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
@@ -132,6 +187,7 @@ const load = useCallback(async (isRefresh = false) => {
       setLoading(false);
     }
   }, []);
+
   useEffect(() => {
     requestLocation();
     load();
@@ -262,7 +318,14 @@ const load = useCallback(async (isRefresh = false) => {
         </div>
       </div>
 
-      <div className="v-map-frame">
+      {/* Map Element Container Canvas Frame with React Ref hook bindings */}
+      <div className={`v-map-frame ${isFullscreen ? "is-fullscreen" : ""}`} ref={mapFrameRef}>
+        
+        {/* Native Floating UI Fullscreen Trigger Button control element */}
+        <button className="v-map-fullscreen-trigger" onClick={toggleFullscreen} title="Toggle Fullscreen View">
+          {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+        </button>
+
         {(showLocationOverlay || loading) && (
           <div className="v-loading-overlay">
             <span className="v-loading-spinner" />
@@ -295,6 +358,7 @@ const load = useCallback(async (isRefresh = false) => {
             attribution='&copy; OpenStreetMap contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
+          <ResizeMapTrigger isFullscreen={isFullscreen} />
           {locationStatus === "granted" && <FlyToCenter center={userLocation} zoom={6} />}
           {focusIncident && <FlyToIncident incident={focusIncident} />}
           {visibleIncidents.map((incident) => {
