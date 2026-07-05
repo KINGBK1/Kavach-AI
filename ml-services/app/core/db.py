@@ -116,7 +116,8 @@ def init_db():
             recommended_actions TEXT,
             model TEXT,
             processing_time_ms INTEGER,
-            analyzed_at TIMESTAMPTZ DEFAULT NOW()
+            analyzed_at TIMESTAMPTZ DEFAULT NOW(),
+            alert_sent BOOLEAN DEFAULT FALSE
         )
         """)
 

@@ -41,6 +41,11 @@ async fn main() {
     let ai_service_url =
         env::var("AI_SERVICE_URL").unwrap_or_else(|_| "http://localhost:8000".into());
 
+    let mail_service_url =
+        env::var("MAIL_SERVICE_URL").unwrap_or_else(|_| "http://localhost:8001".into());
+
+    println!("[MAIN] MAIL_SERVICE_URL = {}", mail_service_url);
+
     let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET environment variable missing");
 
     let google_client_id = env::var("GOOGLE_CLIENT_ID").unwrap_or_default();
@@ -68,6 +73,7 @@ async fn main() {
     let state = Arc::new(AppState::new(
         pool,
         ai_service_url,
+        mail_service_url,
         jwt_secret,
         google_client_id,
     ));
@@ -87,6 +93,7 @@ async fn main() {
         Method::POST,
         Method::PUT,
         Method::DELETE,
+        Method::PATCH,
         Method::OPTIONS,
     ])
     .allow_headers([

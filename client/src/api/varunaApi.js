@@ -8,13 +8,22 @@
 //   POST /chat                 -> { question } -> { answer, relevant_incidents, confidence, model, processing_time_ms }
 //   POST /report               -> { description, latitude, longitude, category } -> AI analysis of the report
 import axios from "axios";
+import Cookies from "js-cookie";
 import { API_BASE_URL } from "../config";
 
 const BASE_URL = API_BASE_URL;
 
 const client = axios.create({
   baseURL: BASE_URL,
-  timeout: 90000, // analysis endpoints can be slow (LLM calls)
+  timeout: 90000,
+});
+
+client.interceptors.request.use((config) => {
+  const token = Cookies.get("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 /** GET /incidents — raw deduplicated incidents, no AI analysis */
@@ -191,6 +200,19 @@ export const SEVERITY_COLORS = {
   Moderate: "#eab308",
   High: "#f97316",
   Critical: "#dc2626",
+};
+
+/** PATCH /auth/profile — update lat/lng and preferences */
+export const updateProfile = async ({ latitude, longitude, preferences }) => {
+  console.log("[updateProfile] → PATCH /auth/profile", { latitude, longitude, preferences });
+  try {
+    const { data } = await client.patch("/auth/profile", { latitude, longitude, preferences });
+    console.log("[updateProfile] ✅ success:", data);
+    return data;
+  } catch (err) {
+    console.error("[updateProfile] ❌ FAILED:", err.response?.status, err.response?.data || err.message);
+    throw err;
+  }
 };
 
 export default client;

@@ -10,7 +10,11 @@ router = APIRouter(
 
 @router.post("")
 def analyze(incident: IncidentRequest):
-    return analyze_incident(incident)
+    print(f"[ML-ANALYZE] Received analysis request: lat={incident.latitude}, lng={incident.longitude}, desc={incident.description[:60]}", flush=True)
+    result = analyze_incident(incident)
+    analysis = result.get("analysis", {})
+    print(f"[ML-ANALYZE] Analysis complete: severity={analysis.get('severity')}, type={analysis.get('incident_type')}", flush=True)
+    return result
 
 @router.get("/all")
 def analyze_all(limit: int = Query(default=50, ge=1, le=2000)):
