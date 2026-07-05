@@ -26,6 +26,14 @@ pub struct AnalysisMetadata {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct Verification {
+    pub is_verified: bool,
+    pub confidence: f64,
+    pub reasoning: String,
+    pub matched_sources: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ChatRequest {
     pub question: String,
 }

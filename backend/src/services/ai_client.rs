@@ -113,6 +113,33 @@ impl AiClient {
         Ok(chat)
     }
 
+    pub async fn verify_report(&self, description: &str, latitude: f64, longitude: f64) -> Result<Value> {
+        let url = format!("{}/verify", self.base_url);
+        let body = serde_json::json!({
+            "description": description,
+            "latitude": latitude,
+            "longitude": longitude,
+        });
+        let response = self.client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            return Err(anyhow!("AI service /verify failed {}: {}", status, text));
+        }
+
+        let value = serde_json::from_str::<Value>(&text).map_err(|err| {
+            anyhow!("AI service /verify response decode failed: {} - body: {}", err, text)
+        })?;
+
+        Ok(value)
+    }
+
     pub async fn get_dashboard(&self) -> Result<Value> {
         let url = format!("{}/analyze/dashboard", self.base_url);
         let response = self.client

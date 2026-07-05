@@ -81,20 +81,25 @@ async fn submit_report(
     let client = AiClient::new(state.ai_service_url.clone());
 
     let result = client
-        .analyze_single(
+        .verify_report(
             &report.description,
             report.latitude,
             report.longitude,
         )
         .await
         .map_err(|e| {
-            tracing::error!("Failed to analyze citizen report: {:?}", e);
+            tracing::error!("Failed to verify citizen report: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    println!("[REPORT] AI analysis succeeded, extracting fields...");
+    println!("[REPORT] AI verification succeeded, extracting fields...");
 
     let analysis = result.get("analysis").and_then(|a| a.as_object());
+    let verification = result.get("verification").and_then(|v| v.as_object());
+
+    let is_verified = verification
+        .and_then(|v| v.get("is_verified").and_then(|b| b.as_bool()))
+        .unwrap_or(false);
     let severity = analysis.and_then(|a| a.get("severity").and_then(|s| s.as_str())).unwrap_or("UNKNOWN");
     let incident_type = analysis.and_then(|a| a.get("incident_type").and_then(|t| t.as_str())).unwrap_or("UNKNOWN");
     let summary = analysis.and_then(|a| a.get("summary").and_then(|s| s.as_str())).unwrap_or("");
@@ -104,8 +109,8 @@ async fn submit_report(
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
 
-    println!("[REPORT] Extracted: severity={}, incident_type={}, summary_len={}",
-        severity, incident_type, summary.len());
+    println!("[REPORT] Extracted: severity={}, incident_type={}, is_verified={}",
+        severity, incident_type, is_verified);
 
     let incident_id = uuid::Uuid::new_v4().to_string();
     let title = if !incident_type.is_empty() && incident_type != "UNKNOWN" {
@@ -116,55 +121,55 @@ async fn submit_report(
 
     let category = report.category.unwrap_or_else(|| "citizen-report".to_string());
 
-    let alert_payload = serde_json::json!({
-        "incident_id": incident_id,
-        "title": title,
-        "description": report.description,
-        "summary": summary,
-        "recommended_actions": recommended_actions,
-        "latitude": report.latitude,
-        "longitude": report.longitude,
-        "category": category,
-        "incident_type": incident_type,
-        "severity": severity,
-        "source": "citizen-report",
-    });
+    if is_verified {
+        let alert_payload = serde_json::json!({
+            "incident_id": incident_id,
+            "title": title,
+            "description": report.description,
+            "summary": summary,
+            "recommended_actions": recommended_actions,
+            "latitude": report.latitude,
+            "longitude": report.longitude,
+            "category": category,
+            "incident_type": incident_type,
+            "severity": severity,
+            "source": "citizen-report",
+        });
 
-    let mail_url = format!("{}/alerts", state.mail_service_url);
-    println!("[REPORT] Triggering mail: POST {} with incident_id={}, severity={}, type={}, lat={}, lng={}",
-        mail_url, incident_id, severity, incident_type, report.latitude, report.longitude);
-    println!("[REPORT] Full payload: {}", serde_json::to_string(&alert_payload).unwrap());
+        let mail_url = format!("{}/alerts", state.mail_service_url);
+        println!("[REPORT] Report VERIFIED — triggering mail: POST {} with incident_id={}, severity={}",
+            mail_url, incident_id, severity);
 
-    let http_client = state.http_client.clone();
-    tokio::spawn(async move {
-        println!("[REPORT] Spawned task: sending request to mail service...");
-        match http_client
-            .post(&mail_url)
-            .json(&alert_payload)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                println!("[REPORT] Mail service responded: status={}, body={}", status, body);
-                if status.is_success() {
-                    tracing::info!("Alert email triggered for citizen report {}", incident_id);
-                } else {
-                    tracing::warn!(
-                        "Mail service returned {} for citizen report {}: {}",
-                        status, incident_id, body
-                    );
+        let http_client = state.http_client.clone();
+        tokio::spawn(async move {
+            match http_client
+                .post(&mail_url)
+                .json(&alert_payload)
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    if status.is_success() {
+                        tracing::info!("Alert email sent for verified citizen report {}", incident_id);
+                    } else {
+                        tracing::warn!(
+                            "Mail service returned {} for citizen report {}: {}",
+                            status, incident_id, body
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to send alert for citizen report {}: {:?}", incident_id, e);
                 }
             }
-            Err(e) => {
-                println!("[REPORT] Mail service REQUEST FAILED: {:?}", e);
-                tracing::warn!("Failed to send alert for citizen report {}: {:?}", incident_id, e);
-            }
-        }
-    });
+        });
+    } else {
+        println!("[REPORT] Report NOT verified — skipping mail alert");
+    }
 
-    println!("[REPORT] Returning analysis result to frontend");
+    println!("[REPORT] Returning analysis + verification result to frontend");
     Ok(Json(result))
 }

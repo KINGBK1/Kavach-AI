@@ -1,37 +1,51 @@
-// src/routes/auth.rs
-//
-// Migrated from the old Node/Express `server/controllers/authController.js`.
-// Handles local (username/password) auth, Google Sign-In, and account status.
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     routing::{get, patch, post},
     Json, Router,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::models::user::{
-    AuthResponse, GoogleLoginRequest, LoginRequest, ProfileUpdate, PublicUser, RegisterRequest,
+    AuthResponse, GoogleLoginRequest, PublicUser,
 };
 use crate::repository::users::UserRepository;
 use crate::services::auth_extractor::AuthUser;
+use crate::services::otp;
 use crate::services::{google_auth, jwt};
 use crate::state::AppState;
+
+#[derive(Deserialize)]
+pub struct SendOtpRequest {
+    pub identifier: Option<String>,
+    pub email: Option<String>,
+    pub name: Option<String>,
+    pub purpose: String,
+}
+
+#[derive(Deserialize)]
+pub struct VerifyOtpRequest {
+    pub email: String,
+    pub code: String,
+    pub purpose: String,
+    pub name: Option<String>,
+    pub password: Option<String>,
+}
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/ping", get(ping))
-        .route("/register", post(register))
-        .route("/login", post(login))
+        .route("/send-otp", post(send_otp))
+        .route("/verify-otp", post(verify_otp))
         .route("/google-login", post(google_login))
-    .route("/status", get(status))
-    .route("/profile", patch(update_profile))
-    .route("/approve/{id}", patch(approve_user))
-    .with_state(state)
+        .route("/status", get(status))
+        .route("/profile", patch(update_profile))
+        .route("/approve/{id}", patch(approve_user))
+        .with_state(state)
 }
 
 async fn health() -> Json<Value> {
@@ -50,170 +64,239 @@ fn err(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<Valu
     (status, Json(json!({ "message": message.into() })))
 }
 
-// ---------------------------------------------------------------------
-// Register (local signup)
-// ---------------------------------------------------------------------
-async fn register(
+async fn send_otp(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<RegisterRequest>,
-) -> Result<(StatusCode, Json<Value>), (StatusCode, Json<Value>)> {
+    Json(payload): Json<SendOtpRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let repo = UserRepository::new(state.db.clone());
 
-    if payload.username.trim().is_empty() {
-        return Err(err(StatusCode::BAD_REQUEST, "Username is required"));
-    }
+    let email = if payload.purpose == "signup" {
+        let email = payload.email.as_deref().map(|e| e.trim().to_lowercase())
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "Email is required"))?;
+        if !email.contains('@') || !email.contains('.') {
+            return Err(err(StatusCode::BAD_REQUEST, "Invalid email address"));
+        }
 
-    let official_id = payload.resolved_official_id();
+        let name = payload.name.as_deref().map(|n| n.trim()).unwrap_or("");
+        if name.is_empty() {
+            return Err(err(StatusCode::BAD_REQUEST, "Name is required"));
+        }
 
-    if payload.role != "user" && official_id.as_deref().unwrap_or("").is_empty() {
-        return Err(err(
-            StatusCode::BAD_REQUEST,
-            "Official ID is required for this role",
-        ));
-    }
-
-    if payload.role == "user" && payload.password.as_deref().unwrap_or("").is_empty() {
-        return Err(err(
-            StatusCode::BAD_REQUEST,
-            "Password is required for regular users",
-        ));
-    }
-
-    if let Some(email) = payload.email.as_deref() {
-        if repo
-            .find_by_email(email)
-            .await
-            .map_err(|e| {
-                tracing::error!("register: find_by_email failed: {e:?}");
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
-            })?
-            .is_some()
-        {
+        if repo.find_by_email(&email).await.map_err(|e| {
+            tracing::error!("send_otp: find_by_email failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?.is_some() {
             return Err(err(StatusCode::BAD_REQUEST, "Email already registered"));
+        }
+        if repo.find_by_username(name).await.map_err(|e| {
+            tracing::error!("send_otp: find_by_username failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?.is_some() {
+            return Err(err(StatusCode::BAD_REQUEST, "Username already taken"));
+        }
+
+        email
+    } else if payload.purpose == "signin" {
+        let identifier = payload.identifier.as_deref().map(|i| i.trim().to_lowercase())
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "Email or username is required"))?;
+
+        let user = repo.find_by_email_or_username(&identifier).await.map_err(|e| {
+            tracing::error!("send_otp: find_by_email_or_username failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?.ok_or_else(|| {
+            err(StatusCode::NOT_FOUND, "No account found with this email or username")
+        })?;
+
+        user.email.ok_or_else(|| {
+            err(StatusCode::BAD_REQUEST, "No email associated with this account")
+        })?
+    } else if payload.purpose == "reset-password" {
+        let email = payload.email.as_deref().map(|e| e.trim().to_lowercase())
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "Email is required"))?;
+        if !email.contains('@') || !email.contains('.') {
+            return Err(err(StatusCode::BAD_REQUEST, "Invalid email address"));
+        }
+
+        let user = repo.find_by_email(&email).await.map_err(|e| {
+            tracing::error!("send_otp: find_by_email failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?;
+
+        match user {
+            Some(u) if u.password_hash.is_some() => {}
+            Some(_) => {
+                return Err(err(StatusCode::BAD_REQUEST, "This account uses Google Sign-In. Please sign in with Google."));
+            }
+            None => {
+                return Ok(Json(json!({ "success": true, "email": email, "message": "If an account exists with this email, a reset code has been sent." })));
+            }
+        }
+
+        email
+    } else {
+        return Err(err(StatusCode::BAD_REQUEST, "Purpose must be 'signup', 'signin', or 'reset-password'"));
+    };
+
+    let can_resend = otp::can_resend(&state.db, &email, &payload.purpose)
+        .await
+        .map_err(|e| {
+            tracing::error!("send_otp: rate check failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?;
+
+    if !can_resend {
+        return Err(err(StatusCode::TOO_MANY_REQUESTS, "Please wait before requesting a new code"));
+    }
+
+    let code = otp::generate_otp();
+
+    otp::store_otp(&state.db, &email, &code, &payload.purpose)
+        .await
+        .map_err(|e| {
+            tracing::error!("send_otp: store failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to store OTP")
+        })?;
+
+    let otp_url = format!("{}/otp", state.mail_service_url);
+    match state.http_client
+        .post(&otp_url)
+        .json(&serde_json::json!({ "email": email, "otp": code }))
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                tracing::warn!("send_otp: mail service returned {}: {}", status, body);
+            }
+        }
+        Err(e) => {
+            tracing::warn!("send_otp: mail service call failed: {e:?}");
         }
     }
 
-    if repo
-        .find_by_username(&payload.username)
-        .await
-        .map_err(|e| {
-            tracing::error!("register: find_by_username failed: {e:?}");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
-        })?
-        .is_some()
-    {
-        return Err(err(StatusCode::BAD_REQUEST, "Username already taken"));
-    }
-
-    let password_hash = match payload.password.as_deref() {
-        Some(pw) => Some(
-            bcrypt::hash(pw, bcrypt::DEFAULT_COST)
-                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash password"))?,
-        ),
-        None => None,
-    };
-
-    let is_approved = payload.role == "user";
-
-    let user = repo
-        .create_local_user(
-            &payload.username,
-            payload.email.as_deref(),
-            password_hash.as_deref(),
-            &payload.role,
-            official_id.as_deref(),
-            payload.location.as_deref(),
-            payload.latitude,
-            payload.longitude,
-            payload.phone.as_deref(),
-            payload.ngo_details.as_ref(),
-            is_approved,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("Register error: {e:?}");
-            err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        })?;
-
-    if user.role != "user" {
-        return Ok((
-            StatusCode::CREATED,
-            Json(json!({
-                "message": "Account created. Awaiting admin approval.",
-                "user": PublicUser::from(user)
-            })),
-        ));
-    }
-
-    let token = jwt::generate_token(user.id, &user.role, &state.jwt_secret)
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to generate token"))?;
-
-    let response = AuthResponse {
-        token,
-        user: user.into(),
-    };
-
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::to_value(response).unwrap_or_else(|_| json!({}))),
-    ))
+    Ok(Json(json!({ "success": true, "email": email, "message": "OTP sent to email" })))
 }
 
-// ---------------------------------------------------------------------
-// Local login
-// ---------------------------------------------------------------------
-async fn login(
+async fn verify_otp(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<LoginRequest>,
-) -> Result<Json<AuthResponse>, (StatusCode, Json<Value>)> {
-    if payload.username.is_empty() || payload.password.is_empty() {
-        return Err(err(
-            StatusCode::BAD_REQUEST,
-            "Username and password are required",
-        ));
+    Json(payload): Json<VerifyOtpRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let email = payload.email.trim().to_lowercase();
+
+    let valid = otp::verify_otp(&state.db, &email, &payload.code, &payload.purpose)
+        .await
+        .map_err(|e| {
+            tracing::error!("verify_otp: verification failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?;
+
+    if !valid {
+        return Err(err(StatusCode::BAD_REQUEST, "Invalid or expired OTP"));
     }
 
     let repo = UserRepository::new(state.db.clone());
 
-    let user = repo
-        .find_by_username(&payload.username)
-        .await
-        .map_err(|e| {
-            tracing::error!("login: find_by_username failed: {e:?}");
+    if payload.purpose == "signup" {
+        let username = payload.name.as_deref().unwrap_or("User");
+        let password = payload.password.as_deref().unwrap_or("");
+
+        if password.len() < 6 {
+            return Err(err(StatusCode::BAD_REQUEST, "Password must be at least 6 characters"));
+        }
+
+        if repo.find_by_email(&email).await.map_err(|e| {
+            tracing::error!("verify_otp: find_by_email failed: {e:?}");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
-        })?
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
+        })?.is_some() {
+            return Err(err(StatusCode::BAD_REQUEST, "Email already registered"));
+        }
 
-    if !user.is_approved {
-        return Err(err(
-            StatusCode::FORBIDDEN,
-            "Account pending admin approval",
-        ));
+        let password_hash = bcrypt::hash(password, bcrypt::DEFAULT_COST)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash password"))?;
+
+        let user = repo
+            .create_local_user(
+                username,
+                Some(&email),
+                Some(&password_hash),
+                "user",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                true,
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("verify_otp: create user failed: {e:?}");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create account")
+            })?;
+
+        let token = jwt::generate_token(user.id, &user.role, &state.jwt_secret)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to generate token"))?;
+
+        return Ok(Json(serde_json::to_value(AuthResponse {
+            token,
+            user: user.into(),
+        }).unwrap_or_else(|_| json!({}))));
     }
 
-    let matches = match user.password_hash.as_deref() {
-        Some(hash) => bcrypt::verify(&payload.password, hash).unwrap_or(false),
-        None => false,
-    };
+    if payload.purpose == "signin" {
+        let user = repo.find_by_email(&email).await.map_err(|e| {
+            tracing::error!("verify_otp: find_by_email failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?.ok_or_else(|| {
+            err(StatusCode::NOT_FOUND, "No account found with this email")
+        })?;
 
-    if !matches {
-        return Err(err(StatusCode::BAD_REQUEST, "Invalid credentials"));
+        repo.touch_last_login(user.id).await.ok();
+
+        let token = jwt::generate_token(user.id, &user.role, &state.jwt_secret)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to generate token"))?;
+
+        return Ok(Json(serde_json::to_value(AuthResponse {
+            token,
+            user: user.into(),
+        }).unwrap_or_else(|_| json!({}))));
     }
 
-    repo.touch_last_login(user.id).await.ok();
+    if payload.purpose == "reset-password" {
+        let password = payload.password.as_deref().unwrap_or("");
 
-    let token = jwt::generate_token(user.id, &user.role, &state.jwt_secret)
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to generate token"))?;
+        if password.len() < 6 {
+            return Err(err(StatusCode::BAD_REQUEST, "Password must be at least 6 characters"));
+        }
 
-    Ok(Json(AuthResponse {
-        token,
-        user: user.into(),
-    }))
+        let user = repo.find_by_email(&email).await.map_err(|e| {
+            tracing::error!("verify_otp: find_by_email failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?.ok_or_else(|| {
+            err(StatusCode::NOT_FOUND, "No account found with this email")
+        })?;
+
+        if user.password_hash.is_none() {
+            return Err(err(StatusCode::BAD_REQUEST, "This account uses Google Sign-In. Please sign in with Google."));
+        }
+
+        let password_hash = bcrypt::hash(password, bcrypt::DEFAULT_COST)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash password"))?;
+
+        repo.update_password(&email, &password_hash).await.map_err(|e| {
+            tracing::error!("verify_otp: update_password failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update password")
+        })?;
+
+        return Ok(Json(json!({ "success": true, "message": "Password reset successful. Please sign in with your new password." })));
+    }
+
+    Err(err(StatusCode::BAD_REQUEST, "Invalid purpose"))
 }
 
-// ---------------------------------------------------------------------
-// Google login/signup (regular users only, mirrors old behavior)
-// ---------------------------------------------------------------------
 async fn google_login(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<GoogleLoginRequest>,
@@ -277,9 +360,6 @@ async fn google_login(
     }))
 }
 
-// ---------------------------------------------------------------------
-// Current session status (requires Authorization: Bearer <jwt>)
-// ---------------------------------------------------------------------
 async fn status(AuthUser(user): AuthUser) -> Json<Value> {
     Json(json!({
         "success": true,
@@ -287,18 +367,11 @@ async fn status(AuthUser(user): AuthUser) -> Json<Value> {
     }))
 }
 
-// ---------------------------------------------------------------------
-// Update profile (location, preferences) — authenticated
-// ---------------------------------------------------------------------
 async fn update_profile(
     State(state): State<Arc<AppState>>,
     AuthUser(current_user): AuthUser,
-    Json(payload): Json<ProfileUpdate>,
+    Json(payload): Json<crate::models::user::ProfileUpdate>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    tracing::info!(
-        "PATCH /auth/profile user_id={} lat={:?} lng={:?}",
-        current_user.id, payload.latitude, payload.longitude
-    );
     let repo = UserRepository::new(state.db.clone());
 
     let user = repo
@@ -321,19 +394,13 @@ async fn update_profile(
     })))
 }
 
-// ---------------------------------------------------------------------
-// Approve a pending NGO/DDMO/Admin account (admin only)
-// ---------------------------------------------------------------------
 async fn approve_user(
     State(state): State<Arc<AppState>>,
     AuthUser(current_user): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     if current_user.role != "admin" {
-        return Err(err(
-            StatusCode::FORBIDDEN,
-            "Access denied. Required roles: admin",
-        ));
+        return Err(err(StatusCode::FORBIDDEN, "Access denied. Required roles: admin"));
     }
 
     let repo = UserRepository::new(state.db.clone());

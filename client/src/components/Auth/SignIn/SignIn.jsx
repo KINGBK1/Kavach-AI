@@ -1,65 +1,98 @@
-
-import React, { useState, useContext } from "react";
+import React, { useState, useContext, useRef, useEffect } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
-import { User, Eye, EyeOff, Shield } from "lucide-react";
+import { Mail, Shield } from "lucide-react";
 import { AuthContext } from "../../Auth/context/authContextValue";
 import TriColorAnimation from "../TriColorAnimation/TriColorAnimation";
 import "./SignIn.css";
 import nightImage from "../../../assets/night-mountain-city.jpg";
 import brandLogo from "../../../assets/varuna.png";
-import { API_BASE_URL,AUTH_BASE_URL , GOOGLE_AUTH_ENABLED } from "../../../config";
+import { API_BASE_URL, AUTH_BASE_URL, GOOGLE_AUTH_ENABLED } from "../../../config";
+
+const RESEND_COOLDOWN = 60;
 
 const SignInPage = () => {
   const navigate = useNavigate();
   const { login } = useContext(AuthContext);
-  const [formData, setFormData] = useState({
-    username: "",
-    password: "",
-  });
-  const [showPassword, setShowPassword] = useState(false);
+  const [step, setStep] = useState("email");
+  const [identifier, setIdentifier] = useState("");
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [countdown, setCountdown] = useState(0);
   const [showAnimation, setShowAnimation] = useState(false);
   const [userName, setUserName] = useState("");
+  const inputRefs = useRef([]);
+
+  useEffect(() => {
+    if (countdown > 0) {
+      const t = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(t);
+    }
+  }, [countdown]);
 
   const showMessage = (msg, type) => {
     setMessage(msg);
     setMessageType(type);
-    setTimeout(() => {
-      setMessage("");
-      setMessageType("");
-    }, 5000);
+    setTimeout(() => { setMessage(""); setMessageType(""); }, 5000);
   };
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+  const handleOtpChange = (index, value) => {
+    if (value && !/^\d$/.test(value)) return;
+    const newOtp = [...otp];
+    newOtp[index] = value;
+    setOtp(newOtp);
+    if (value && index < 5) {
+      inputRefs.current[index + 1]?.focus();
+    }
   };
 
-  const handleSubmit = async () => {
-    if (!formData.username || !formData.password) {
-      showMessage("Please enter username and password.", "error");
+  const handleOtpKeyDown = (index, e) => {
+    if (e.key === "Backspace" && !otp[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleSendOtp = async () => {
+    if (!identifier.trim()) {
+      showMessage("Please enter your email or username.", "error");
       return;
     }
-
+    setLoading(true);
     try {
-      const res = await axios.post(`${AUTH_BASE_URL}/auth/login`, {
-        username: formData.username,
-        password: formData.password,
-      });
+      const res = await axios.post(`${AUTH_BASE_URL}/auth/send-otp`, { identifier: identifier.trim(), purpose: "signin" });
+      setEmail(res.data.email);
+      setStep("otp");
+      setCountdown(RESEND_COOLDOWN);
+      showMessage("OTP sent to your email.", "success");
+    } catch (err) {
+      showMessage(err.response?.data?.message || "Failed to send OTP.", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      // Set user name and show animation
-      setUserName(res.data.user?.name || res.data.username || formData.username || "User");
+  const handleVerifyOtp = async () => {
+    const code = otp.join("");
+    if (code.length !== 6) {
+      showMessage("Please enter the 6-digit code.", "error");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await axios.post(`${AUTH_BASE_URL}/auth/verify-otp`, {
+        email, code, purpose: "signin",
+      });
+      setUserName(res.data.user?.username || email.split("@")[0]);
       login(res.data.token);
       setShowAnimation(true);
     } catch (err) {
-      console.error(err.response?.data || err.message);
-      showMessage(err.response?.data?.message || "Login failed.", "error");
+      showMessage(err.response?.data?.message || "Invalid or expired OTP.", "error");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -68,19 +101,15 @@ const SignInPage = () => {
       const res = await axios.post(`${AUTH_BASE_URL}/auth/google-login`, {
         token: credentialResponse.credential,
       });
-
-      // Set user name and show animation
       setUserName(res.data.user?.name || res.data.username || "User");
       login(res.data.token);
       setShowAnimation(true);
     } catch (err) {
-      console.error("Google login error:", err.response?.data || err.message);
       showMessage("Google login failed.", "error");
     }
   };
 
-  const handleGoogleError = (errorResponse) => {
-    console.error("Google login error:", errorResponse);
+  const handleGoogleError = () => {
     showMessage("Google login failed.", "error");
   };
 
@@ -88,18 +117,29 @@ const SignInPage = () => {
     navigate("/dashboard");
   };
 
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const digits = text.replace(/\D/g, "").slice(0, 6).split("");
+      const newOtp = ["", "", "", "", "", ""];
+      digits.forEach((d, i) => { newOtp[i] = d; });
+      setOtp(newOtp);
+      if (digits.length === 6) {
+        setTimeout(handleVerifyOtp, 300);
+      }
+    } catch {}
+  };
+
   return (
     <div className="page__wrapper">
-      {/* Tri-Color Animation */}
       <TriColorAnimation
         isVisible={showAnimation}
         onComplete={handleAnimationComplete}
         userName={userName}
       />
-
       <div className="signin-layout">
         <div className="signin-layout__visuals">
-          <img src={nightImage} alt="Night Mountain City" className="background-image" />
+          <img src={nightImage} alt="" className="background-image" />
           <div className="overlay"></div>
           <div className="visuals__content">
             <div className="center__welcome">
@@ -112,9 +152,7 @@ const SignInPage = () => {
                 </div>
                 <div className="brand__text">
                   <h2 className="brand__name">KAVACH</h2>
-                  <p className="brand__tagline">
-                    Unified disaster management platform for building a resilient nation.
-                  </p>
+                  <p className="brand__tagline">Unified disaster management platform for building a resilient nation.</p>
                 </div>
               </div>
             </div>
@@ -123,85 +161,92 @@ const SignInPage = () => {
 
         <div className="signin-layout__form-container">
           <div className="form__header">
-            <h2 className="form__title">Sign In to your account</h2>
+            <h2 className="form__title">Sign In</h2>
             <p className="form__subtitle">
-              Welcome back. Please enter your details.
+              {step === "email" ? "Enter your email or username to receive a verification code." : "Enter the 6-digit code sent to your email."}
             </p>
           </div>
+
           <div className="form__main">
             {message && <div className={`message-box message-box--${messageType}`}>{message}</div>}
-            <div className="form__section">
-              <div className="input__container">
-                <label htmlFor="username" className="input__label">
-                  Username
-                </label>
-                <div className="input__wrapper">
-                  <input
-                    id="username"
-                    type="text"
-                    name="username"
-                    placeholder="Enter your username"
-                    value={formData.username}
-                    onChange={handleInputChange}
-                    className="input__field"
-                  />
-                  <User size={20} className="input__icon" />
-                </div>
-              </div>
 
-              <div className="input__container">
-                <label htmlFor="password" className="input__label">
-                  Password
-                </label>
-                <div className="input__wrapper">
-                  <input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    name="password"
-                    placeholder="Enter your password"
-                    value={formData.password}
-                    onChange={handleInputChange}
-                    className="input__field"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="input__password-toggle"
-                  >
-                    {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+            {step === "email" ? (
+              <div className="form__section">
+                <div className="input__container">
+                  <label htmlFor="identifier" className="input__label">Email or Username</label>
+                  <div className="input__wrapper">
+                    <input
+                      id="identifier"
+                      type="text"
+                      placeholder="Enter your email or username"
+                      value={identifier}
+                      onChange={(e) => setIdentifier(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleSendOtp()}
+                      className="input__field"
+                      autoFocus
+                    />
+                    <Mail size={20} className="input__icon" />
+                  </div>
+                </div>
+                <div className="form__actions" style={{ marginTop: 16 }}>
+                  <button onClick={handleSendOtp} disabled={loading} className="button button--primary">
+                    {loading ? "Sending..." : "Send OTP →"}
                   </button>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="form__section">
+                <div className="otp-step-indicator">
+                  <span className="otp-step-back" onClick={() => { setStep("email"); setOtp(["", "", "", "", "", ""]); }}>
+                    ← Change
+                  </span>
+                  <span className="otp-email-display">{email}</span>
+                </div>
 
-            <div className="form__section form__actions">
-              <button onClick={handleSubmit} className="button button--primary">
-                Sign In →
-              </button>
-            </div>
+                <div className="otp-input-group" onClick={pasteFromClipboard} title="Tap to paste from clipboard">
+                  {otp.map((digit, i) => (
+                    <input
+                      key={i}
+                      ref={(el) => { inputRefs.current[i] = el; }}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) => handleOtpChange(i, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                      className="otp-digit-input"
+                      autoFocus={i === 0}
+                    />
+                  ))}
+                </div>
+
+                <div className="form__actions" style={{ marginTop: 16 }}>
+                  <button onClick={handleVerifyOtp} disabled={loading} className="button button--primary">
+                    {loading ? "Verifying..." : "Verify & Sign In →"}
+                  </button>
+                </div>
+
+                <div className="otp-resend" onClick={handleSendOtp}>
+                  {countdown > 0 ? `Resend code in ${countdown}s` : "Resend code"}
+                </div>
+              </div>
+            )}
 
             {GOOGLE_AUTH_ENABLED && (
               <div className="oauth-section">
-                <div className="divider">
-                  <span className="divider__text">or continue with</span>
-                </div>
+                <div className="divider"><span className="divider__text">or continue with</span></div>
                 <div className="google-btn-wrapper">
-                  <GoogleLogin
-                    onSuccess={handleGoogleSuccess}
-                    onError={handleGoogleError}
-                    useOneTap={false}
-                    state_cookie_domain="localhost" // <-- Explicitly locks the initialization domain context
-                  />
+                  <GoogleLogin onSuccess={handleGoogleSuccess} onError={handleGoogleError} useOneTap={false} />
                 </div>
               </div>
             )}
           </div>
 
           <div className="form__footer">
-            <span>New user? </span>
-            <Link to="/signup" className="link--inline">
-              Create an account
-            </Link>
+            <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
+              <span><Link to="/forgot-password" className="link--inline">Forgot password?</Link></span>
+              <span>New user? <Link to="/signup" className="link--inline">Create an account</Link></span>
+            </div>
           </div>
         </div>
       </div>

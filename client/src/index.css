@@ -38,6 +38,21 @@
   --v-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   --v-radius: 12px;
   --v-radius-sm: 8px;
+
+  --v-radius-xs: 6px;
+  --v-radius-lg: 16px;
+  --v-radius-xl: 20px;
+  --v-radius-full: 9999px;
+
+  --v-bg: #f8fafc;
+  --v-surface-hover: #f1f5f9;
+  --v-text-tertiary: #94a3b8;
+  --v-accent-blue-soft: rgba(37, 99, 235, 0.08);
+  --v-accent-blue: #2563eb;
+
+  --v-rag-stage-1: #3b82f6;
+  --v-rag-stage-2: #8b5cf6;
+  --v-rag-stage-3: #06b6d4;
 }
 
 .v-mono { font-family: var(--v-mono); }

@@ -7,3 +7,4 @@ pub mod auth;
 pub mod auth_extractor;
 pub mod jwt;
 pub mod google_auth;
+pub mod otp;

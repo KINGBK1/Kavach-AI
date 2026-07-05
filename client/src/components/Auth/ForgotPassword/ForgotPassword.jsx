@@ -1,35 +1,24 @@
-import React, { useState, useContext, useRef, useEffect } from "react";
-import { Mail, Eye, EyeOff, User, Lock } from "lucide-react";
-import { GoogleLogin } from "@react-oauth/google";
+import React, { useState, useRef, useEffect } from "react";
+import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import axios from "axios";
+import { useNavigate, Link } from "react-router-dom";
 import "../SignIn/SignIn.css";
-import "./SignUp.css";
-import { Link, useNavigate } from "react-router-dom";
-import { AuthContext } from "../../Auth/context/authContextValue";
-import TriColorAnimation from "../TriColorAnimation/TriColorAnimation";
-import nightImage from "../../../assets/night-mountain-city.jpg";
-import brandLogo from "../../../assets/varuna.png";
-import { API_BASE_URL, AUTH_BASE_URL, GOOGLE_AUTH_ENABLED } from "../../../config";
 
 const RESEND_COOLDOWN = 60;
 
-const SignUpPage = () => {
+const ForgotPassword = () => {
   const navigate = useNavigate();
-  const { login } = useContext(AuthContext);
   const [step, setStep] = useState("email");
   const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
-  const [showAnimation, setShowAnimation] = useState(false);
-  const [userName, setUserName] = useState("");
   const inputRefs = useRef([]);
 
   useEffect(() => {
@@ -42,7 +31,7 @@ const SignUpPage = () => {
   const showMessage = (msg, type) => {
     setMessage(msg);
     setMessageType(type);
-    setTimeout(() => { setMessage(""); setMessageType(""); }, 5000);
+    setTimeout(() => { setMessage(""); setMessageType(""); }, 6000);
   };
 
   const handleOtpChange = (index, value) => {
@@ -66,18 +55,17 @@ const SignUpPage = () => {
       showMessage("Please enter a valid email address.", "error");
       return;
     }
-    if (!name.trim()) {
-      showMessage("Please enter your username.", "error");
-      return;
-    }
     setLoading(true);
     try {
-      await axios.post(`${AUTH_BASE_URL}/auth/send-otp`, { name: name.trim(), email, purpose: "signup" });
-      setStep("register");
+      await axios.post(`${import.meta.env.VITE_API_URL || "http://localhost:8080"}/api/auth/send-otp`, {
+        email,
+        purpose: "reset-password",
+      });
+      setStep("otp");
       setCountdown(RESEND_COOLDOWN);
-      showMessage("OTP sent to your email.", "success");
+      showMessage("If an account exists with this email, a reset code has been sent.", "success");
     } catch (err) {
-      showMessage(err.response?.data?.message || "Failed to send OTP.", "error");
+      showMessage(err.response?.data?.message || "Failed to send reset code.", "error");
     } finally {
       setLoading(false);
     }
@@ -87,10 +75,6 @@ const SignUpPage = () => {
     const code = otp.join("");
     if (code.length !== 6) {
       showMessage("Please enter the 6-digit code.", "error");
-      return;
-    }
-    if (!name.trim()) {
-      showMessage("Please enter your username.", "error");
       return;
     }
     if (password.length < 6) {
@@ -103,38 +87,19 @@ const SignUpPage = () => {
     }
     setLoading(true);
     try {
-      const res = await axios.post(`${AUTH_BASE_URL}/auth/verify-otp`, {
-        email, code, purpose: "signup", name: name.trim(), password,
+      await axios.post(`${import.meta.env.VITE_API_URL || "http://localhost:8080"}/api/auth/verify-otp`, {
+        email,
+        code,
+        purpose: "reset-password",
+        password,
       });
-      setUserName(name.trim());
-      login(res.data.token);
-      setShowAnimation(true);
+      showMessage("Password reset successful! Redirecting to sign in...", "success");
+      setTimeout(() => navigate("/signin"), 2000);
     } catch (err) {
-      showMessage(err.response?.data?.message || "Verification failed.", "error");
+      showMessage(err.response?.data?.message || "Invalid or expired code.", "error");
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleGoogleSuccess = async (credentialResponse) => {
-    try {
-      const res = await axios.post(`${AUTH_BASE_URL}/auth/google-login`, {
-        token: credentialResponse.credential,
-      });
-      setUserName(res.data.user?.name || res.data.username || "User");
-      login(res.data.token);
-      setShowAnimation(true);
-    } catch (err) {
-      showMessage("Google signup failed.", "error");
-    }
-  };
-
-  const handleGoogleError = () => {
-    showMessage("Google signup failed.", "error");
-  };
-
-  const handleAnimationComplete = () => {
-    navigate("/dashboard");
   };
 
   const pasteFromClipboard = async () => {
@@ -149,38 +114,25 @@ const SignUpPage = () => {
 
   return (
     <div className="page__wrapper">
-      <TriColorAnimation
-        isVisible={showAnimation}
-        onComplete={handleAnimationComplete}
-        userName={userName}
-      />
       <div className="signin-layout">
         <div className="signin-layout__visuals">
-          <img src={nightImage} alt="" className="background-image" />
           <div className="overlay"></div>
           <div className="visuals__content">
             <div className="center__welcome">
-              <h1 className="center__title">Join KAVACH</h1>
-            </div>
-            <div className="bottom__branding">
-              <div className="brand__logo-container">
-                <div className="brand__logo">
-                  <img src={brandLogo} alt="Kavach Logo" className="brand__icon" width={60} height={60} />
-                </div>
-                <div className="brand__text">
-                  <h2 className="brand__name">KAVACH</h2>
-                  <p className="brand__tagline">Unified disaster management platform for building a resilient nation.</p>
-                </div>
-              </div>
+              <h1 className="center__title">Reset Password</h1>
             </div>
           </div>
         </div>
 
         <div className="signin-layout__form-container">
           <div className="form__header">
-            <h2 className="form__title">Create Account</h2>
+            <h2 className="form__title">Forgot Password</h2>
             <p className="form__subtitle">
-              {step === "email" ? "Enter your username and email to get started." : "Verify your email and set up your account."}
+              {step === "email"
+                ? "Enter your email to receive a reset code."
+                : step === "otp"
+                ? "Enter the 6-digit code sent to your email."
+                : "Set your new password."}
             </p>
           </div>
 
@@ -189,22 +141,6 @@ const SignUpPage = () => {
 
             {step === "email" ? (
               <div className="form__section">
-                <div className="input__container">
-                  <label htmlFor="name" className="input__label">Username</label>
-                  <div className="input__wrapper">
-                    <input
-                      id="name"
-                      type="text"
-                      placeholder="Choose a username"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && document.getElementById("email")?.focus()}
-                      className="input__field"
-                      autoFocus
-                    />
-                    <User size={20} className="input__icon" />
-                  </div>
-                </div>
                 <div className="input__container">
                   <label htmlFor="email" className="input__label">Email</label>
                   <div className="input__wrapper">
@@ -216,38 +152,24 @@ const SignUpPage = () => {
                       onChange={(e) => setEmail(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleSendOtp()}
                       className="input__field"
+                      autoFocus
                     />
                     <Mail size={20} className="input__icon" />
                   </div>
                 </div>
                 <div className="form__actions" style={{ marginTop: 16 }}>
                   <button onClick={handleSendOtp} disabled={loading} className="button button--primary">
-                    {loading ? "Sending..." : "Send OTP →"}
+                    {loading ? "Sending..." : "Send Reset Code →"}
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : step === "otp" ? (
               <div className="form__section">
                 <div className="otp-step-indicator">
                   <span className="otp-step-back" onClick={() => { setStep("email"); setOtp(["", "", "", "", "", ""]); }}>
                     ← Change email
                   </span>
                   <span className="otp-email-display">{email}</span>
-                </div>
-
-                <div className="input__container" style={{ marginTop: 12 }}>
-                  <label className="input__label">Username</label>
-                  <div className="input__wrapper">
-                    <input
-                      type="text"
-                      placeholder="Enter your username"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="input__field"
-                      autoFocus
-                    />
-                    <User size={20} className="input__icon" />
-                  </div>
                 </div>
 
                 <div className="otp-input-group" onClick={pasteFromClipboard}>
@@ -262,12 +184,32 @@ const SignUpPage = () => {
                       onChange={(e) => handleOtpChange(i, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(i, e)}
                       className="otp-digit-input"
+                      autoFocus={i === 0}
                     />
                   ))}
                 </div>
 
-                <div className="input__container">
-                  <label className="input__label">Password</label>
+                <div className="form__actions" style={{ marginTop: 16 }}>
+                  <button onClick={() => setStep("password")} disabled={loading || otp.join("").length !== 6} className="button button--primary">
+                    Continue →
+                  </button>
+                </div>
+
+                <div className="otp-resend" onClick={handleSendOtp}>
+                  {countdown > 0 ? `Resend code in ${countdown}s` : "Resend code"}
+                </div>
+              </div>
+            ) : (
+              <div className="form__section">
+                <div className="otp-step-indicator">
+                  <span className="otp-step-back" onClick={() => setStep("otp")}>
+                    ← Change code
+                  </span>
+                  <span className="otp-email-display">{email}</span>
+                </div>
+
+                <div className="input__container" style={{ marginTop: 12 }}>
+                  <label className="input__label">New Password</label>
                   <div className="input__wrapper">
                     <input
                       type={showPassword ? "text" : "password"}
@@ -275,6 +217,7 @@ const SignUpPage = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="input__field"
+                      autoFocus
                     />
                     <button type="button" onClick={() => setShowPassword(!showPassword)} className="input__password-toggle">
                       {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
@@ -300,28 +243,15 @@ const SignUpPage = () => {
 
                 <div className="form__actions" style={{ marginTop: 16 }}>
                   <button onClick={handleVerifyOtp} disabled={loading} className="button button--primary">
-                    {loading ? "Creating account..." : "Create Account →"}
+                    {loading ? "Resetting..." : "Reset Password →"}
                   </button>
-                </div>
-
-                <div className="otp-resend" onClick={handleSendOtp}>
-                  {countdown > 0 ? `Resend code in ${countdown}s` : "Resend code"}
-                </div>
-              </div>
-            )}
-
-            {GOOGLE_AUTH_ENABLED && (
-              <div className="oauth-section">
-                <div className="divider"><span className="divider__text">or continue with</span></div>
-                <div className="google-btn-wrapper">
-                  <GoogleLogin onSuccess={handleGoogleSuccess} onError={handleGoogleError} useOneTap={false} />
                 </div>
               </div>
             )}
           </div>
 
           <div className="form__footer">
-            <span>Already have an account? </span>
+            <span>Remember your password? </span>
             <Link to="/signin" className="link--inline">Sign in</Link>
           </div>
         </div>
@@ -330,4 +260,4 @@ const SignUpPage = () => {
   );
 };
 
-export default SignUpPage;
+export default ForgotPassword;

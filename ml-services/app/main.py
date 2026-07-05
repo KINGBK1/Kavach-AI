@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.sources import router as sources_router
 from app.api.analyze import router as analyze_router
 from app.api.health import router as health_router
+from app.api.verify import router as verify_router
 from app.api.analytics import router as analytics_router
 from app.core.db import init_db
 from app.api.chat import router as chat_router
@@ -34,3 +35,4 @@ app.include_router(analyze_router)
 app.include_router(sources_router)
 app.include_router(chat_router)
 app.include_router(analytics_router)
+app.include_router(verify_router)

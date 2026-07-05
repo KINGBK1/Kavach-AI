@@ -1,6 +1,16 @@
 from pydantic import BaseModel
 
 
+class OtpRequest(BaseModel):
+    email: str
+    otp: str
+
+
+class OtpResponse(BaseModel):
+    sent: bool
+    message: str
+
+
 class AlertTrigger(BaseModel):
     incident_id: str
     title: str

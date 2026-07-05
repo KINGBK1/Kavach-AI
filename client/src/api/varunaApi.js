@@ -54,6 +54,21 @@ export const askAI = async (question) => {
 export const askKavach = askAI;
 export const askVaruna = askAI;
 
+/** POST /auth/send-otp — request OTP for signup or signin */
+export const sendOtp = async ({ email, purpose }) => {
+  const { data } = await client.post("/auth/send-otp", { email, purpose });
+  return data;
+};
+
+/** POST /auth/verify-otp — verify OTP and complete signup or signin */
+export const verifyOtp = async ({ email, code, purpose, name, password }) => {
+  const payload = { email, code, purpose };
+  if (name) payload.name = name;
+  if (password) payload.password = password;
+  const { data } = await client.post("/auth/verify-otp", payload);
+  return data;
+};
+
 /** POST /report — citizen report submission, returns AI analysis of the report */
 export const submitReport = async ({ description, latitude, longitude, category }) => {
   const { data } = await client.post("/incidents/report", { description, latitude, longitude, category });

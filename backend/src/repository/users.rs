@@ -57,6 +57,18 @@ impl UserRepository {
         Ok(user)
     }
 
+    pub async fn find_by_email_or_username(&self, identifier: &str) -> Result<Option<User>> {
+        let sql = format!(
+            "SELECT {} FROM users WHERE email = $1 OR username = $1",
+            Self::SELECT_COLS
+        );
+        let user = sqlx::query_as::<_, User>(&sql)
+            .bind(identifier)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(user)
+    }
+
     pub async fn find_by_google_id(&self, google_id: &str) -> Result<Option<User>> {
         let sql = format!(
             "SELECT {} FROM users WHERE google_id = $1",
@@ -157,6 +169,17 @@ impl UserRepository {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    pub async fn update_password(&self, email: &str, password_hash: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE users SET password_hash = $1, updated_at = now() WHERE email = $2"
+        )
+        .bind(password_hash)
+        .bind(email)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     pub async fn update_profile(

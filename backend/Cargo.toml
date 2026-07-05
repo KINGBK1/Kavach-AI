@@ -28,6 +28,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Auth
 jsonwebtoken = { version = "10.4.0", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 bcrypt = "0.19.2"
+rand = "0.8"
 
 # Utils
 uuid = { version = "1", features = ["v4", "serde"] }

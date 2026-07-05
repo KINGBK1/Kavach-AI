@@ -19,6 +19,20 @@
   margin: 0 auto;
   padding: 34px 24px 68px;
 }
+
+.v-page-content--full {
+  padding: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.v-page-content--full > * {
+  flex: 1;
+  min-height: 0;
+}
+
 @media (max-width: 860px) {
   .v-page-content { padding: 26px 18px 56px; }
 }

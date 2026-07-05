@@ -125,6 +125,17 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
                 {result.analysis.recommended_actions.map((a, i) => <li key={i}>{a}</li>)}
               </ul>
             )}
+            {result.verification && (
+              <div className={`v-verification-badge ${result.verification.is_verified ? "verified" : "unverified"}`}>
+                {result.verification.is_verified ? (
+                  <>✓ Verified — {result.verification.matched_sources?.length > 0
+                    ? `corroborated by ${result.verification.matched_sources.join(", ")}`
+                    : "consistent with known data"}</>
+                ) : (
+                  <>✗ Unverified — {result.verification.reasoning || "no corroborating data found"}</>
+                )}
+              </div>
+            )}
             <div className="v-timeline-time v-mono">
               {result.metadata?.model} · {(result.metadata?.processing_time_ms / 1000).toFixed(1)}s
             </div>

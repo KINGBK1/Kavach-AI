@@ -19,6 +19,34 @@ def _send_single(to_email: str, subject: str, html: str) -> None:
         server.send_message(msg)
 
 
+def send_otp_email(to_email: str, otp: str) -> None:
+    subject = "Your KAVACH verification code"
+    body = f"""
+<html>
+<body style="font-family: Arial, sans-serif; padding: 20px;">
+  <h2 style="color: #1e40af;">KAVACH Verification</h2>
+  <p>Your one-time verification code is:</p>
+  <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px;
+              text-align: center; padding: 20px; margin: 20px 0;
+              background: #f1f5f9; border-radius: 12px;">
+    {otp}
+  </div>
+  <p>This code expires in 5 minutes.</p>
+  <p style="color: #64748b; font-size: 12px;">If you didn't request this, please ignore this email.</p>
+</body>
+</html>
+"""
+    msg = MIMEMultipart("alternative")
+    msg["From"] = FROM_EMAIL
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "html"))
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.send_message(msg)
+
+
 def send_alerts(
     recipients: list[dict],
     incident_id: str,

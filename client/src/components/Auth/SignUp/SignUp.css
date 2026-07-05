@@ -715,3 +715,78 @@
       grid-template-columns: 1fr;
     }
   }
+
+/* OTP Input Styles */
+.otp-step-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+
+.otp-step-back {
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.otp-step-back:hover {
+  text-decoration: underline;
+}
+
+.otp-email-display {
+  color: var(--color-text-light);
+  font-weight: 500;
+}
+
+.otp-input-group {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin: 24px 0;
+  cursor: pointer;
+}
+
+.otp-digit-input {
+  width: 48px;
+  height: 56px;
+  text-align: center;
+  font-size: 24px;
+  font-weight: 700;
+  border: 2px solid var(--color-border);
+  border-radius: var(--border-radius-md);
+  outline: none;
+  transition: var(--transition-base);
+  color: var(--color-text-dark);
+  background: white;
+}
+
+.otp-digit-input:focus {
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.otp-resend {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.otp-resend:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 480px) {
+  .otp-digit-input {
+    width: 40px;
+    height: 48px;
+    font-size: 20px;
+  }
+  .otp-input-group {
+    gap: 6px;
+  }
+}

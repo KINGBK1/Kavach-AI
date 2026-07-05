@@ -536,6 +536,29 @@
   font-size: 12.5px;
 }
 
+.v-verification-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-radius: 10px;
+  margin: 10px 0;
+}
+
+.v-verification-badge.verified {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #15803d;
+}
+
+.v-verification-badge.unverified {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
 .v-modal-result h4 {
   font-size: 16px;
   font-weight: 700;
