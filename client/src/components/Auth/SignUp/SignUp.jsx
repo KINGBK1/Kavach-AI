@@ -104,11 +104,17 @@ const SignUpPage = () => {
 
     setIsSubmitting(true);
     try {
+      const [latStr, lngStr] = (formData.location || "").split(",").map((s) => s.trim());
+      const lat = latStr ? parseFloat(latStr) : undefined;
+      const lng = lngStr ? parseFloat(lngStr) : undefined;
+
       const payload = {
         role: userType,
         username: userType === "user" ? formData.username : `${userType}_${Date.now()}`,
         password: userType === "user" ? formData.password : undefined,
         location: formData.location,
+        latitude: !isNaN(lat) ? lat : undefined,
+        longitude: !isNaN(lng) ? lng : undefined,
         [`${userType}Id`]: formData.entityId || undefined,
       };
 

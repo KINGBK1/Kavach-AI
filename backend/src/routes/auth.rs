@@ -14,7 +14,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::models::user::{
-    AuthResponse, GoogleLoginRequest, LoginRequest, PublicUser, RegisterRequest,
+    AuthResponse, GoogleLoginRequest, LoginRequest, ProfileUpdate, PublicUser, RegisterRequest,
 };
 use crate::repository::users::UserRepository;
 use crate::services::auth_extractor::AuthUser;
@@ -28,9 +28,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/register", post(register))
         .route("/login", post(login))
         .route("/google-login", post(google_login))
-        .route("/status", get(status))
-        .route("/approve/{id}", patch(approve_user))
-        .with_state(state)
+    .route("/status", get(status))
+    .route("/profile", patch(update_profile))
+    .route("/approve/{id}", patch(approve_user))
+    .with_state(state)
 }
 
 async fn health() -> Json<Value> {
@@ -122,6 +123,8 @@ async fn register(
             &payload.role,
             official_id.as_deref(),
             payload.location.as_deref(),
+            payload.latitude,
+            payload.longitude,
             payload.phone.as_deref(),
             payload.ngo_details.as_ref(),
             is_approved,
@@ -282,6 +285,40 @@ async fn status(AuthUser(user): AuthUser) -> Json<Value> {
         "success": true,
         "user": PublicUser::from(user)
     }))
+}
+
+// ---------------------------------------------------------------------
+// Update profile (location, preferences) — authenticated
+// ---------------------------------------------------------------------
+async fn update_profile(
+    State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
+    Json(payload): Json<ProfileUpdate>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    tracing::info!(
+        "PATCH /auth/profile user_id={} lat={:?} lng={:?}",
+        current_user.id, payload.latitude, payload.longitude
+    );
+    let repo = UserRepository::new(state.db.clone());
+
+    let user = repo
+        .update_profile(
+            current_user.id,
+            payload.latitude,
+            payload.longitude,
+            payload.preferences,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("update_profile failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
+
+    Ok(Json(json!({
+        "success": true,
+        "user": PublicUser::from(user)
+    })))
 }
 
 // ---------------------------------------------------------------------
