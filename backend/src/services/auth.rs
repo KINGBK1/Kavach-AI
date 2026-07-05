@@ -116,6 +116,8 @@ async fn register(
             &payload.role,
             official_id.as_deref(),
             payload.location.as_deref(),
+            payload.latitude,
+            payload.longitude,
             payload.phone.as_deref(),
             payload.ngo_details.as_ref(),
             is_approved,

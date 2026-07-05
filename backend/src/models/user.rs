@@ -14,6 +14,8 @@ pub struct User {
     pub role: String,
     pub official_id: Option<String>,
     pub location: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub phone: Option<String>,
     pub bio: Option<String>,
     pub picture: Option<String>,
@@ -36,6 +38,8 @@ pub struct PublicUser {
     #[serde(rename = "officialId")]
     pub official_id: Option<String>,
     pub location: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub phone: Option<String>,
     pub bio: Option<String>,
     pub picture: Option<String>,
@@ -59,6 +63,8 @@ impl From<User> for PublicUser {
             role: u.role,
             official_id: u.official_id,
             location: u.location,
+            latitude: u.latitude,
+            longitude: u.longitude,
             phone: u.phone,
             bio: u.bio,
             picture: u.picture,
@@ -79,14 +85,13 @@ pub struct RegisterRequest {
     #[serde(default = "default_role")]
     pub role: String,
     pub location: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub phone: Option<String>,
     #[serde(rename = "officialId")]
     pub official_id: Option<String>,
     #[serde(rename = "ngoDetails")]
     pub ngo_details: Option<Value>,
-    /// Captures role-specific id fields the client sends dynamically,
-    /// e.g. `adminId`, `ngoId`, `ddmoId` (mirrors the old Node backend's
-    /// `req.body[`${role}Id`]` lookup).
     #[serde(flatten)]
     pub extra: std::collections::HashMap<String, Value>,
 }
@@ -106,6 +111,13 @@ impl RegisterRequest {
 
 fn default_role() -> String {
     "user".to_string()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileUpdate {
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub preferences: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
