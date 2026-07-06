@@ -19,7 +19,7 @@ router = APIRouter(
 
 
 @router.get("/nasa")
-def nasa_events(limit: int = Query(default=20, ge=1, le=100)):
+def nasa_events(limit: int = Query(default=20, ge=1, le=6000)):
 
     connector = NASAConnector()
 
@@ -101,7 +101,7 @@ def google_news(query: str | None = None, limit: int = Query(default=20, ge=1, l
     return incidents[:limit]
 
 @router.get("/all")
-def all_sources(limit: int = Query(default=500, ge=1, le=2000)):
+def all_sources(limit: int = Query(default=500, ge=1, le=6000)):
     """
     Reads incidents from Postgres instead of live-hitting all 7 connectors
     on every request. The background scheduler (services/scheduler.py) is

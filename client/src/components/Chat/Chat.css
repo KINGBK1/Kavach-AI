@@ -83,23 +83,79 @@
   color: #ffffff;
 }
 
-.v-chat-bubble p {
-  margin: 0;
+.v-chat-markdown {
   font-size: 13.5px;
   line-height: 1.6;
   color: var(--text-primary, #0f172a);
-  white-space: pre-wrap;
   overflow-wrap: break-word;
 }
 
-.v-chat-row.user .v-chat-bubble p { color: #ffffff; }
+.v-chat-markdown p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.v-chat-markdown p + p,
+.v-chat-markdown p + ul,
+.v-chat-markdown ul + p,
+.v-chat-markdown h3 + p,
+.v-chat-markdown h4 + p,
+.v-chat-markdown h3 + ul,
+.v-chat-markdown h4 + ul {
+  margin-top: 8px;
+}
+
+.v-chat-markdown h3,
+.v-chat-markdown h4 {
+  margin: 0;
+  color: var(--text-primary, #0f172a);
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.v-chat-markdown h3 { font-size: 15px; }
+.v-chat-markdown h4 { font-size: 14px; }
+
+.v-chat-markdown ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.v-chat-markdown li {
+  margin: 5px 0;
+  padding-left: 2px;
+}
+
+.v-chat-markdown strong {
+  font-weight: 750;
+  color: inherit;
+}
+
+.v-chat-markdown a {
+  color: var(--accent-blue, #2563eb);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.v-chat-markdown a:hover { text-decoration: underline; }
+
+.v-chat-row.user .v-chat-markdown,
+.v-chat-row.user .v-chat-markdown h3,
+.v-chat-row.user .v-chat-markdown h4,
+.v-chat-row.user .v-chat-markdown a {
+  color: #ffffff;
+}
 
 .v-chat-bubble.error {
   background: #fef2f2;
   border-color: #fecaca;
 }
 
-.v-chat-bubble.error p { color: #991b1b; }
+.v-chat-bubble.error .v-chat-markdown,
+.v-chat-bubble.error .v-chat-markdown h3,
+.v-chat-bubble.error .v-chat-markdown h4 {
+  color: #991b1b;
+}
 
 .v-chat-retry-btn {
   display: inline-flex;
@@ -170,11 +226,28 @@
   padding: 5px 10px;
   font-size: 11px;
   color: var(--text-secondary, #64748b);
+  text-decoration: none;
+}
+
+a.v-chat-incident-chip {
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+a.v-chat-incident-chip:hover {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: rgba(37, 99, 235, 0.04);
+  color: var(--accent-blue, #2563eb);
 }
 
 .v-chat-incident-chip strong {
   color: var(--text-primary, #0f172a);
   font-weight: 600;
+}
+
+.v-chat-map-link-icon {
+  color: var(--accent-blue, #2563eb);
+  flex-shrink: 0;
 }
 
 /* ==========================================================================

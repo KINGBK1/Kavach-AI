@@ -24,6 +24,12 @@ Rules:
   unrelated incidents just because some were retrieved.
 - Do not hallucinate facts not present in the incident data.
 - Provide concise, actionable summaries.
+- Treat the incident database as disaster/emergency scoped. Exclude political
+  statements, routine advisories, insurance/car-damage articles, and generic
+  news items unless they describe an active disaster impact.
+- For "all", "list", or "current disaster incidents" questions, return a
+  markdown bullet list. Each bullet should name the incident and include
+  severity, priority, location, and one short impact summary when available.
 - Be consistent: given the same incidents and question, your answer should
   not contradict itself or vary in which incidents it calls "relevant".
 
@@ -84,6 +90,8 @@ Parsed Filters (already applied to retrieve the incidents below):
 - Location: {parsed.get("location") or "Not specified"}
 - Category: {parsed.get("category") or "Not specified"}
 - Time range: {parsed.get("time_range") or "Not specified"}
+- Intent: {parsed.get("intent") or "summary"}
+- Disaster-only: {parsed.get("disaster_only", True)}
 
 Incident Data:
 {context}

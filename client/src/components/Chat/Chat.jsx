@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Send, Bot, User as UserIcon, Sparkles, MapPin, Copy, Check, Trash2, RotateCcw } from "lucide-react";
+import { Send, Bot, User as UserIcon, Sparkles, MapPin, Copy, Check, Trash2, RotateCcw, ExternalLink } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { askAI } from "../../api/varunaApi";
 import { lookUpLocationName } from "../../utils/geolocation";
@@ -16,6 +16,117 @@ const WELCOME_MESSAGE = {
   role: "assistant",
   answer:
     "I'm Kavach. Ask me about current incidents — severity, location, trends, or what needs attention first.",
+};
+
+const getIncidentCoordinates = (incident) => {
+  const lat = incident?.latitude ?? incident?.lat ?? incident?.coordinates?.latitude;
+  const lng = incident?.longitude ?? incident?.lng ?? incident?.coordinates?.longitude;
+  const latitude = Number(lat);
+  const longitude = Number(lng);
+  return Number.isFinite(latitude) && Number.isFinite(longitude)
+    ? { latitude, longitude }
+    : null;
+};
+
+const getGoogleMapsUrl = (incident) => {
+  const coords = getIncidentCoordinates(incident);
+  const query = coords
+    ? `${coords.latitude},${coords.longitude}`
+    : incident?.location || incident?.country || incident?.title;
+
+  return query
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
+    : null;
+};
+
+const renderInlineMarkdown = (text) => {
+  const parts = String(text).split(/(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*)/g);
+
+  return parts.map((part, index) => {
+    const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (link) {
+      return (
+        <a key={index} href={link[2]} target="_blank" rel="noopener noreferrer">
+          {link[1]}
+        </a>
+      );
+    }
+
+    const bold = part.match(/^\*\*([^*]+)\*\*$/);
+    if (bold) return <strong key={index}>{bold[1]}</strong>;
+
+    return <React.Fragment key={index}>{part}</React.Fragment>;
+  });
+};
+
+const MarkdownMessage = ({ text }) => {
+  const blocks = [];
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  let paragraph = [];
+  let list = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push({ type: "p", text: paragraph.join(" ") });
+    paragraph = [];
+  };
+
+  const flushList = () => {
+    if (!list.length) return;
+    blocks.push({ type: "ul", items: list });
+    list = [];
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+      return;
+    }
+
+    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", level: heading[1].length, text: heading[2] });
+      return;
+    }
+
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/) || trimmed.match(/^\d+\.\s+(.+)$/);
+    if (bullet) {
+      flushParagraph();
+      list.push(bullet[1]);
+      return;
+    }
+
+    flushList();
+    paragraph.push(trimmed);
+  });
+
+  flushParagraph();
+  flushList();
+
+  return (
+    <div className="v-chat-markdown">
+      {blocks.map((block, index) => {
+        if (block.type === "heading") {
+          const HeadingTag = block.level === 1 ? "h3" : "h4";
+          return <HeadingTag key={index}>{renderInlineMarkdown(block.text)}</HeadingTag>;
+        }
+        if (block.type === "ul") {
+          return (
+            <ul key={index}>
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+              ))}
+            </ul>
+          );
+        }
+        return <p key={index}>{renderInlineMarkdown(block.text)}</p>;
+      })}
+    </div>
+  );
 };
 
 const CopyButton = ({ text }) => {
@@ -55,12 +166,11 @@ const Chat = () => {
       if (m.role !== "assistant" || !Array.isArray(m.relevant_incidents)) return;
       m.relevant_incidents.forEach((incident) => {
         if (incident && typeof incident === "object") {
-          const lat = incident.latitude ?? incident.lat ?? incident.coordinates?.latitude;
-          const lng = incident.longitude ?? incident.lng ?? incident.coordinates?.longitude;
-          if (lat != null && lng != null) {
-            const key = `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
+          const coords = getIncidentCoordinates(incident);
+          if (coords) {
+            const key = `${coords.latitude.toFixed(4)},${coords.longitude.toFixed(4)}`;
             if (!(key in locationNames)) {
-              incidentsToResolve.push({ key, lat, lng });
+              incidentsToResolve.push({ key, lat: coords.latitude, lng: coords.longitude });
             }
           }
         }
@@ -170,7 +280,7 @@ const Chat = () => {
                 {m.role === "assistant" ? <Bot size={16} /> : <UserIcon size={16} />}
               </div>
               <div className={`v-chat-bubble ${m.isError ? "error" : ""}`}>
-                <p>{m.answer}</p>
+                <MarkdownMessage text={m.answer} />
 
                 {m.isError && m.failedQuery && (
                   <button className="v-chat-retry-btn" onClick={() => retryLast(m.failedQuery)}>
@@ -182,19 +292,30 @@ const Chat = () => {
                   <div className="v-chat-incidents">
                     {m.relevant_incidents.map((inc, i) => {
                       if (inc && typeof inc === "object") {
-                        const lat = inc.latitude ?? inc.lat ?? inc.coordinates?.latitude;
-                        const lng = inc.longitude ?? inc.lng ?? inc.coordinates?.longitude;
-                        const key = lat != null && lng != null ? `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}` : null;
+                        const coordsForLookup = getIncidentCoordinates(inc);
+                        const key = coordsForLookup ? `${coordsForLookup.latitude.toFixed(4)},${coordsForLookup.longitude.toFixed(4)}` : null;
                         const locationName = key ? locationNames[key] : null;
                         const title = inc.title || inc.incident_id || "Incident";
-                        const coords = lat != null && lng != null ? `(${Number(lat).toFixed(3)}, ${Number(lng).toFixed(3)})` : "";
+                        const coords = coordsForLookup ? `(${coordsForLookup.latitude.toFixed(3)}, ${coordsForLookup.longitude.toFixed(3)})` : "";
+                        const fallbackLocation = inc.location || inc.country;
+                        const mapUrl = getGoogleMapsUrl(inc);
+                        const locationText = locationName || fallbackLocation || coords;
+                        const ChipTag = mapUrl ? "a" : "span";
 
                         return (
-                          <span key={i} className="v-chat-incident-chip">
+                          <ChipTag
+                            key={i}
+                            className="v-chat-incident-chip"
+                            href={mapUrl || undefined}
+                            target={mapUrl ? "_blank" : undefined}
+                            rel={mapUrl ? "noopener noreferrer" : undefined}
+                            title={mapUrl ? "Open location in Google Maps" : undefined}
+                          >
                             <MapPin size={12} />
                             <strong>{title}</strong>
-                            {locationName ? ` — ${locationName}` : coords ? ` — ${coords}` : ""}
-                          </span>
+                            {locationText ? ` — ${locationText}` : ""}
+                            {mapUrl && <ExternalLink size={11} className="v-chat-map-link-icon" />}
+                          </ChipTag>
                         );
                       }
                       return (

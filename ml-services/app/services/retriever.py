@@ -8,6 +8,48 @@ from app.core.models import AnalysisModel, IncidentModel
 from app.services.query_parser import parse_query, time_range_bounds
 
 
+DISASTER_CATEGORIES = {
+    "cyclone",
+    "drought",
+    "earthquake",
+    "fire",
+    "flood",
+    "landslide",
+    "storm",
+    "tsunami",
+    "volcano",
+    "wildfire",
+    "wildfires",
+}
+
+DISASTER_TERMS = [
+    "cyclone",
+    "drought",
+    "earthquake",
+    "fire",
+    "flood",
+    "hurricane",
+    "landslide",
+    "storm",
+    "tsunami",
+    "typhoon",
+    "volcano",
+    "wildfire",
+]
+
+NON_DISASTER_TERMS = [
+    "election",
+    "modi",
+    "mookerjee",
+    "parliament",
+    "political",
+    "politics",
+    "prime minister",
+    "vehicle insurance",
+    "car insurance",
+]
+
+
 def _build_time_filter(parsed: dict[str, Any]) -> list[Any]:
     filters = []
     start, end = time_range_bounds(parsed.get("time_range"))
@@ -62,6 +104,32 @@ def _build_category_filter(parsed: dict[str, Any]) -> list[Any]:
     return [func.lower(IncidentModel.category) == category.lower()]
 
 
+def _build_disaster_filter(parsed: dict[str, Any]) -> list[Any]:
+    if not parsed.get("disaster_only", True):
+        return []
+
+    category_match = func.lower(IncidentModel.category).in_(DISASTER_CATEGORIES)
+
+    def text_has_any(terms):
+        return or_(
+            *[
+                or_(
+                    func.lower(IncidentModel.title).like(f"%{term}%"),
+                    func.lower(IncidentModel.description).like(f"%{term}%"),
+                )
+                for term in terms
+            ]
+        )
+
+    disaster_text_match = text_has_any(DISASTER_TERMS)
+    non_disaster_text_match = text_has_any(NON_DISASTER_TERMS)
+
+    return [
+        or_(category_match, disaster_text_match),
+        ~non_disaster_text_match,
+    ]
+
+
 def _build_query(parsed: dict[str, Any]) -> Any:
     base = select(
         IncidentModel,
@@ -76,6 +144,7 @@ def _build_query(parsed: dict[str, Any]) -> Any:
     filters.extend(_build_time_filter(parsed))
     filters.extend(_build_location_filter(parsed))
     filters.extend(_build_category_filter(parsed))
+    filters.extend(_build_disaster_filter(parsed))
 
     if filters:
         base = base.where(and_(*filters))

@@ -16,12 +16,16 @@ TIME_MAP = {
 CATEGORY_KEYWORDS = {
     "earthquake": "Earthquake",
     "wildfire": "Wildfires",
+    "fire": "Wildfires",
     "storm": "Storm",
     "cyclone": "Cyclone",
+    "hurricane": "Cyclone",
+    "typhoon": "Cyclone",
     "volcano": "Volcano",
     "flood": "Flood",
     "landslide": "Landslide",
     "tsunami": "Tsunami",
+    "drought": "Drought",
 }
 
 INTENT_PATTERNS = {
@@ -59,6 +63,7 @@ COMMON_LOCATIONS = [
 ]
 
 DEFAULT_LIMIT = 10
+DEFAULT_ALL_LIMIT = 25
 
 
 def _normalize_text(text: str) -> str:
@@ -96,6 +101,8 @@ def _find_limit(text: str) -> int | None:
                 continue
     if "top" in text or "highest" in text or "biggest" in text:
         return 10
+    if re.search(r"\b(all|every)\b", text):
+        return DEFAULT_ALL_LIMIT
     return None
 
 
@@ -105,9 +112,19 @@ def _find_intent(text: str) -> str:
             return intent
     if text.startswith("how many") or text.startswith("what is the"):
         return "count"
-    if "show" in text or "list" in text:
+    if "show" in text or "list" in text or re.search(r"\b(all|every)\b", text):
         return "list"
     return "summary"
+
+
+def _is_disaster_query(text: str) -> bool:
+    # Kavach's chat is incident/disaster scoped. Keep this true by default
+    # so generic questions like "current incidents of India" don't retrieve
+    # unrelated political/news records that slipped into broad RSS feeds.
+    return not any(
+        phrase in text
+        for phrase in ("political", "politics", "election", "prime minister", "modi")
+    )
 
 
 def parse_query(question: str) -> dict[str, Any]:
@@ -125,6 +142,7 @@ def parse_query(question: str) -> dict[str, Any]:
         "location": location,
         "limit": limit,
         "intent": intent,
+        "disaster_only": _is_disaster_query(normalized),
         "original_question": question,
     }
 

@@ -14,7 +14,8 @@ import {
   Terminal,
   Zap,
   Activity,
-  Crosshair
+  Crosshair,
+  CalendarDays
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -42,6 +43,7 @@ import "./UserDashboard.css";
 // UI stays readable even when the backend reports 100+ distinct sources.
 const MAX_SOURCE_SLICES = 8;
 const MAX_CATEGORY_ROWS = 10;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const generateHslPalette = (index, total) => {
   const hue = (index * (360 / Math.max(total, 1))) % 360;
@@ -59,7 +61,14 @@ const SEVERITY_COLORS = {
 const resolveSeverityColor = (severity) =>
   SEVERITY_COLORS[severity?.toLowerCase()] || SEVERITY_COLORS.unknown;
 
-const StatCard = ({ label, value, loading, icon: Icon, trend, info }) => (
+const parseIncidentDate = (item) => {
+  const rawDate = item?.timestamp || item?.analyzed_at;
+  if (!rawDate) return null;
+  const parsed = new Date(String(rawDate).replace(" ", "T"));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const StatCard = ({ label, value, loading, icon: Icon, trend, trendClass = "positive", info }) => (
   <div className="v-premium-kpi-card">
     <div className="v-kpi-header">
       <span className="v-kpi-label">
@@ -78,7 +87,7 @@ const StatCard = ({ label, value, loading, icon: Icon, trend, info }) => (
       <div className="v-kpi-value-wrapper">
         <div className="v-kpi-value">{value}</div>
         {trend && (
-          <div className="v-kpi-trend positive">
+          <div className={`v-kpi-trend ${trendClass}`}>
             <TrendingUp size={12} /> {trend}
           </div>
         )}
@@ -260,6 +269,85 @@ const UserDashboard = () => {
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [recentAnalyses]);
 
+  const dayFormatter = useMemo(
+    () => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }),
+    []
+  );
+
+  const dailyIncidentData = useMemo(() => {
+    const datedIncidents = allIncidents
+      .map((item) => ({ ...item, parsedDate: parseIncidentDate(item) }))
+      .filter((item) => item.parsedDate);
+
+    if (!datedIncidents.length) return [];
+
+    const latestTime = Math.max(...datedIncidents.map((item) => item.parsedDate.getTime()));
+    const latestDay = new Date(latestTime);
+    latestDay.setHours(0, 0, 0, 0);
+    const startDay = new Date(latestDay.getTime() - 13 * DAY_MS);
+
+    const rows = Array.from({ length: 14 }, (_, index) => {
+      const date = new Date(startDay.getTime() + index * DAY_MS);
+      const key = date.toISOString().slice(0, 10);
+      return {
+        key,
+        day: dayFormatter.format(date),
+        incidents: 0
+      };
+    });
+    const rowByKey = new Map(rows.map((row) => [row.key, row]));
+
+    datedIncidents.forEach((item) => {
+      const day = new Date(item.parsedDate);
+      day.setHours(0, 0, 0, 0);
+      const key = day.toISOString().slice(0, 10);
+      const row = rowByKey.get(key);
+      if (row) row.incidents += 1;
+    });
+
+    return rows;
+  }, [allIncidents, dayFormatter]);
+
+  const totalDailyIncidents = dailyIncidentData.reduce((sum, row) => sum + row.incidents, 0);
+  const peakDayRow = dailyIncidentData.reduce(
+    (peak, row) => (row.incidents > (peak?.incidents ?? -1) ? row : peak),
+    null
+  );
+
+  const incidentTrend = useMemo(() => {
+    const datedIncidents = allIncidents
+      .map(parseIncidentDate)
+      .filter(Boolean);
+
+    if (!datedIncidents.length) return null;
+
+    const latestTime = Math.max(...datedIncidents.map((date) => date.getTime()));
+    const latestDay = new Date(latestTime);
+    latestDay.setHours(23, 59, 59, 999);
+    const currentStart = latestDay.getTime() - 7 * DAY_MS + 1;
+    const previousStart = currentStart - 7 * DAY_MS;
+
+    let currentCount = 0;
+    let previousCount = 0;
+    datedIncidents.forEach((date) => {
+      const time = date.getTime();
+      if (time >= currentStart && time <= latestDay.getTime()) currentCount += 1;
+      else if (time >= previousStart && time < currentStart) previousCount += 1;
+    });
+
+    if (currentCount === 0 && previousCount === 0) return null;
+    if (previousCount === 0) {
+      return { label: currentCount > 0 ? "+100%" : "0%", className: currentCount > 0 ? "positive" : "neutral" };
+    }
+
+    const change = ((currentCount - previousCount) / previousCount) * 100;
+    const sign = change > 0 ? "+" : "";
+    return {
+      label: `${sign}${change.toFixed(1)}%`,
+      className: change > 0 ? "positive" : change < 0 ? "negative" : "neutral"
+    };
+  }, [allIncidents]);
+
   // --- Incidents by hour, split by severity -------------------------------
   // The previous bubble scatter (size = count, y = avg priority score,
   // color = severity) was unreadable: color barely showed at small bubble
@@ -406,7 +494,8 @@ const UserDashboard = () => {
             value={summary.total_incidents ?? "0"}
             loading={loading}
             icon={TrendingUp}
-            trend="+12.4%"
+            trend={incidentTrend?.label}
+            trendClass={incidentTrend?.className}
             info="Every incident Varuna has ingested from all connected sources, regardless of severity or whether it's been AI-analyzed yet."
           />
           <StatCard
@@ -608,6 +697,59 @@ const UserDashboard = () => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Incidents by day */}
+        <div className="v-premium-chart-card large-fullwidth">
+          <div className="v-card-header-context">
+            <CalendarDays size={15} className="v-panel-icon" />
+            <h3>Day vs incidents</h3>
+            <InfoTooltip
+              title="Day vs incidents"
+              text={`Every incident in the database grouped by calendar day for the latest 14-day window in the feed. Bar height is total incidents logged that day. The KPI trend compares the latest 7 days with the previous 7 days.`}
+            />
+            {!loading && totalDailyIncidents > 0 && (
+              <span className="v-chart-count-pill v-mono">
+                {totalDailyIncidents.toLocaleString()} incidents ·{" "}
+                {peakDayRow ? `peak on ${peakDayRow.day}` : ""}
+              </span>
+            )}
+          </div>
+          <div className="v-chart-container-fixed">
+            {loading ? (
+              <div className="v-premium-skeleton full-height" />
+            ) : dailyIncidentData.length === 0 ? (
+              <div className="v-empty-chart-fallback">No dated incidents available</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={dailyIncidentData} margin={{ top: 20, right: 20, bottom: 10, left: -10 }}>
+                  <XAxis
+                    dataKey="day"
+                    stroke="#94a3b8"
+                    tickLine={false}
+                    axisLine={{ stroke: "#e2e8f0" }}
+                    fontSize={10.5}
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    tickLine={false}
+                    axisLine={{ stroke: "#e2e8f0" }}
+                    fontSize={11}
+                    allowDecimals={false}
+                    label={{ value: "Incidents", angle: -90, position: "insideLeft", fontSize: 10, fill: "#94a3b8" }}
+                  />
+                  <Tooltip
+                    cursor={{ fill: "rgba(148,163,184,0.12)" }}
+                    contentStyle={{ backgroundColor: "#ffffff", borderColor: "#e2e8f0", borderRadius: "12px", boxShadow: "0 8px 24px rgba(15,23,42,0.12)" }}
+                    labelStyle={{ color: "#0f172a", fontWeight: 700, fontSize: 12.5, marginBottom: 4 }}
+                    formatter={(value) => [`${value} incident${value === 1 ? "" : "s"}`, "Logged"]}
+                    labelFormatter={(label) => `Day: ${label}`}
+                  />
+                  <Bar dataKey="incidents" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 

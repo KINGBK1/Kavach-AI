@@ -293,6 +293,20 @@ body {
   color: var(--accent-emerald);
 }
 
+.v-kpi-trend.negative {
+  background: #fef2f2;
+  color: var(--sev-critical);
+}
+
+.v-kpi-trend.negative svg {
+  transform: rotate(180deg);
+}
+
+.v-kpi-trend.neutral {
+  background: #f1f5f9;
+  color: var(--text-secondary);
+}
+
 .v-kpi-sparkline {
   display: flex;
   align-items: flex-end;
