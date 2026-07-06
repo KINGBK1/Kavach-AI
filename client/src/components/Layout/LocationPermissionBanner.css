@@ -1,0 +1,35 @@
+.v-location-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+  color: #92400e;
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.v-location-banner svg {
+  flex-shrink: 0;
+}
+
+.v-location-banner span {
+  flex: 1;
+}
+
+.v-location-banner-btn {
+  background: #92400e;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.v-location-banner-btn:hover {
+  background: #78350f;
+}

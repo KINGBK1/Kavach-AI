@@ -48,6 +48,14 @@ COMMON_LOCATIONS = [
     "Australia", "Philippines", "Indonesia", "Mexico", "Brazil",
     "Pakistan", "Nepal", "Chile", "Turkey", "Italy", "Greece",
     "Canada", "Spain", "France", "Thailand", "Vietnam",
+    # Indian states/UTs — added because "India" alone doesn't match
+    # state-level questions like "is Assam safe right now".
+    "Assam", "Odisha", "Andhra Pradesh", "West Bengal", "Kerala",
+    "Tamil Nadu", "Karnataka", "Maharashtra", "Gujarat", "Rajasthan",
+    "Punjab", "Bihar", "Uttar Pradesh", "Madhya Pradesh", "Telangana",
+    "Jammu and Kashmir", "Himachal Pradesh", "Uttarakhand", "Goa",
+    "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Tripura", "Sikkim",
+    "Arunachal Pradesh", "Chhattisgarh", "Jharkhand", "Haryana",
 ]
 
 DEFAULT_LIMIT = 10

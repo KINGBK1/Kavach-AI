@@ -63,16 +63,34 @@ export const AuthProvider = ({ children }) => {
     fetchUser();
   };
 
+  const [locationPromptNeeded, setLocationPromptNeeded] = useState(false);
+
   useEffect(() => {
-    console.log("[AuthContext] geolocation useEffect fired, lat:", user?.latitude, "lng:", user?.longitude);
-    if (!user || (user.latitude != null && user.longitude != null)) return;
+    if (!user || (user.latitude != null && user.longitude != null)) {
+      setLocationPromptNeeded(false);
+      return;
+    }
     if (geolocationAttempted.current) return;
     geolocationAttempted.current = true;
-    if (!navigator.geolocation) return;
+
+    if (!window.isSecureContext) {
+      // Most browsers refuse to even show the permission prompt outside
+      // HTTPS/localhost — getCurrentPosition would fail immediately here,
+      // so there's nothing to auto-retry; surface it as a manual action
+      // instead (Profile Settings' "Detect Location" button still works
+      // once the site is actually served over HTTPS).
+      console.warn("[AuthContext] Skipping geolocation auto-capture: not a secure context (HTTPS required).");
+      setLocationPromptNeeded(true);
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      setLocationPromptNeeded(true);
+      return;
+    }
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
-        console.log("[AuthContext] geolocation obtained:", pos.coords.latitude, pos.coords.longitude);
         try {
           const res = await updateProfile({
             latitude: pos.coords.latitude,
@@ -86,11 +104,48 @@ export const AuthProvider = ({ children }) => {
               longitude: res.user.longitude,
             }));
           }
+          setLocationPromptNeeded(false);
         } catch (e) {
           console.error("[AuthContext] Auto-save location failed:", e);
+          setLocationPromptNeeded(true);
         }
       },
-      (err) => console.error("[AuthContext] geolocation error:", err.message),
+      (err) => {
+        // Permission denied, timeout, or position unavailable all land
+        // here. Previously this just logged and gave up forever for the
+        // rest of the session — now we surface it so the user has a
+        // visible, retryable path (see LocationPermissionBanner) instead
+        // of silently never being alertable.
+        console.error("[AuthContext] geolocation error:", err.message);
+        setLocationPromptNeeded(true);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }, [user]);
+
+  const retryLocationCapture = useCallback(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const res = await updateProfile({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            preferences: user?.preferences || { emailAlerts: true },
+          });
+          if (res.user) {
+            setUser((prev) => ({
+              ...prev,
+              latitude: res.user.latitude,
+              longitude: res.user.longitude,
+            }));
+          }
+          setLocationPromptNeeded(false);
+        } catch (e) {
+          console.error("[AuthContext] Retry location save failed:", e);
+        }
+      },
+      (err) => console.error("[AuthContext] Retry geolocation error:", err.message),
       { enableHighAccuracy: true, timeout: 10000 }
     );
   }, [user]);
@@ -103,7 +158,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, user, login, logout, setUser }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, user, login, logout, setUser, locationPromptNeeded, retryLocationCapture }}>
       {children}
     </AuthContext.Provider>
   );

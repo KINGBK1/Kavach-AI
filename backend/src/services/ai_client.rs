@@ -88,6 +88,52 @@ impl AiClient {
         Ok(value)
     }
 
+    /// Like `analyze_single`, but hits the endpoint that scores the report
+    /// AND writes it into the separate `citizen_reports` table (never into
+    /// incidents/analyses — those stay trusted-source-only). Returns
+    /// {report_id, status, corroborating_incidents, analysis, metadata}.
+    /// `reported_by` is the authenticated user's id, used for per-user
+    /// rate limiting on the AI service side.
+    pub async fn analyze_citizen_report(
+        &self,
+        description: &str,
+        latitude: f64,
+        longitude: f64,
+        category: &str,
+        reported_by: &str,
+    ) -> Result<Value> {
+        let url = format!("{}/analyze/citizen-report", self.base_url);
+        let body = serde_json::json!({
+            "description": description,
+            "latitude": latitude,
+            "longitude": longitude,
+            "category": category,
+            "reported_by": reported_by,
+        });
+        let response = self.client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(anyhow!("RATE_LIMITED: {}", text));
+        }
+
+        if !status.is_success() {
+            return Err(anyhow!("AI service /analyze/citizen-report failed {}: {}", status, text));
+        }
+
+        let value = serde_json::from_str::<Value>(&text).map_err(|err| {
+            anyhow!("AI service /analyze/citizen-report response decode failed: {} - body: {}", err, text)
+        })?;
+
+        Ok(value)
+    }
+
     pub async fn chat(&self, question: &str) -> Result<ChatResponse> {
         let url = format!("{}/chat", self.base_url);
         let body = ChatRequest {

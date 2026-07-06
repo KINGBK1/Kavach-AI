@@ -30,9 +30,14 @@ Rules:
 Return valid JSON only with this schema:
 {
     "answer": "",
-    "relevant_incidents": [],
+    "relevant_incidents": ["incident_id_1", "incident_id_2"],
     "confidence": 0.0
 }
+
+relevant_incidents MUST be a list of incident_id strings taken exactly from
+the incidents you were given below — never invent an id, never put a
+description or title there, and never return an empty object. If nothing
+is relevant, return an empty list.
 """
 
 
@@ -98,18 +103,45 @@ User Question:
             try:
                 data = json.loads(cleaned)
             except json.JSONDecodeError:
+                # Never hand the user raw model output here — if both parse
+                # attempts failed, `raw` is unstructured and, worse, may be
+                # a wall of scraped source text (headlines, RSS fragments)
+                # that leaked in through a bad retrieval match rather than
+                # anything Gemini actually said. Fail safely instead.
+                print(f"[CHAT] JSON parse failed twice, raw (truncated): {raw[:200]}", flush=True)
                 return {
-                    "answer": raw,
-                    "relevant_incidents": incidents,
+                    "answer": (
+                        "I couldn't form a clean answer from the matching incidents. "
+                        "Try rephrasing your question, or ask about a specific "
+                        "country/state and category (e.g. \"floods in Assam\")."
+                    ),
+                    "relevant_incidents": [],
                     "confidence": 0.0,
                     "model": result.get("model", "unknown"),
                     "processing_time_ms": result.get("processing_time_ms", 0),
                     "parsed_query": parsed,
                 }
 
+        incidents_by_id = {inc.get("incident_id"): inc for inc in incidents}
+
+        def _resolve_relevant(raw_ids) -> list[dict]:
+            if not isinstance(raw_ids, list):
+                return []
+            resolved = []
+            for entry in raw_ids:
+                # Expect plain incident_id strings per the prompt schema, but
+                # tolerate a model that still returns {"incident_id": "..."}
+                # style objects rather than dropping the row entirely.
+                entry_id = entry if isinstance(entry, str) else (
+                    entry.get("incident_id") if isinstance(entry, dict) else None
+                )
+                if entry_id and entry_id in incidents_by_id:
+                    resolved.append(incidents_by_id[entry_id])
+            return resolved
+
         return {
             "answer": data.get("answer", raw),
-            "relevant_incidents": data.get("relevant_incidents", incidents),
+            "relevant_incidents": _resolve_relevant(data.get("relevant_incidents")),
             "confidence": data.get("confidence", 0.0),
             "model": result.get("model", "unknown"),
             "processing_time_ms": result.get("processing_time_ms", 0),
@@ -117,9 +149,10 @@ User Question:
         }
 
     except Exception as e:
+        print(f"[CHAT] answer_question failed: {e}", flush=True)
         return {
             "answer": "I encountered an error processing your question. Please try again.",
-            "relevant_incidents": incidents,
+            "relevant_incidents": [],
             "confidence": 0.0,
             "model": "unknown",
             "processing_time_ms": 0,

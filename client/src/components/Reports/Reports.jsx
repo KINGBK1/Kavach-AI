@@ -56,7 +56,11 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
       onResult?.(res);
     } catch (err) {
       console.error("Manual analysis failed:", err);
-      setError("Analysis failed. Check the backend is reachable and try again.");
+      if (err.response?.status === 429) {
+        setError("You've submitted several reports in the last hour. Please wait a bit before submitting another.");
+      } else {
+        setError("Analysis failed. Check the backend is reachable and try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -114,6 +118,23 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
           </form>
         ) : (
           <div className="v-modal-result">
+            {result.status === "corroborated" ? (
+              <div className="v-citizen-confirmation v-citizen-confirmation--corroborated">
+                <Sparkles size={16} />
+                <span>
+                  Matched against {result.corroborating_incidents?.length || 1} nearby confirmed
+                  incident{(result.corroborating_incidents?.length || 1) > 1 ? "s" : ""} — a resident alert was triggered.
+                </span>
+              </div>
+            ) : (
+              <div className="v-citizen-confirmation v-citizen-confirmation--pending">
+                <AlertCircle size={16} />
+                <span>
+                  No matching confirmed incident found yet. Your report has been saved and
+                  queued for review — it won't trigger an alert until it's verified.
+                </span>
+              </div>
+            )}
             <div className="v-critical-card-top">
               <SeverityBadge severity={result.analysis.severity} />
               <PriorityScore score={result.analysis.priority_score} severity={result.analysis.severity} />
@@ -445,7 +466,15 @@ const Reports = () => {
                   <SeverityBadge severity={inc.severity} size="sm" />
                   <span className="v-incidents-title" title={inc.title}>{inc.title}</span>
                   <span className="v-incidents-cell v-mono" title={inc.category}>{inc.category}</span>
-                  <span className="v-incidents-cell v-mono" title={inc.source}>{inc.source}</span>
+                  <span className="v-incidents-cell v-mono" title={inc.source}>
+                    {inc.source === "citizen-report" ? (
+                      <span className="v-source-badge-citizen">
+                        <Sparkles size={10} /> Citizen
+                      </span>
+                    ) : (
+                      inc.source
+                    )}
+                  </span>
                   <span className="v-incidents-cell v-mono">{formatDate(inc.timestamp)}</span>
                   {inc.url ? (
                     <a href={inc.url} target="_blank" rel="noopener noreferrer" className="v-incidents-link" title="Open source">
@@ -487,7 +516,7 @@ const Reports = () => {
       </div>
 
       {showModal && (
-        <ManualAnalyzeModal onClose={() => setShowModal(false)} onResult={() => load()} />
+        <ManualAnalyzeModal onClose={() => setShowModal(false)} />
       )}
     </PageShell>
   );

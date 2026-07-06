@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::models::incident::CitizenReport;
 use crate::services::ai_client::AiClient;
+use crate::services::auth_extractor::AuthUser;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -70,29 +71,54 @@ async fn analyze_incidents(
     Ok(Json(json_results))
 }
 
+// Citizen reports now require auth: the reported_by id is what makes
+// per-user rate limiting on the AI service meaningful, and ties each
+// report to an accountable account instead of an anonymous submission.
 async fn submit_report(
     State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
     Json(report): Json<CitizenReport>,
 ) -> Result<Json<Value>, StatusCode> {
-    println!("[REPORT] Received citizen report: lat={}, lng={}, category={:?}, desc={}",
-        report.latitude, report.longitude, report.category,
+    println!("[REPORT] Received citizen report from user={}: lat={}, lng={}, category={:?}, desc={}",
+        current_user.id, report.latitude, report.longitude, report.category,
         &report.description.chars().take(60).collect::<String>());
 
     let client = AiClient::new(state.ai_service_url.clone());
 
+    let category = report.category.clone().unwrap_or_else(|| "Other".to_string());
+
     let result = client
-        .analyze_single(
+        .analyze_citizen_report(
             &report.description,
             report.latitude,
             report.longitude,
+            &category,
+            &current_user.id.to_string(),
         )
         .await
         .map_err(|e| {
+            let msg = e.to_string();
+            if msg.starts_with("RATE_LIMITED") {
+                tracing::warn!("Citizen report rate limited for user {}: {}", current_user.id, msg);
+                return StatusCode::TOO_MANY_REQUESTS;
+            }
             tracing::error!("Failed to analyze citizen report: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
     println!("[REPORT] AI analysis succeeded, extracting fields...");
+
+    let report_id = result
+        .get("report_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let status = result
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unverified")
+        .to_string();
 
     let analysis = result.get("analysis").and_then(|a| a.as_object());
     let severity = analysis.and_then(|a| a.get("severity").and_then(|s| s.as_str())).unwrap_or("UNKNOWN");
@@ -104,66 +130,63 @@ async fn submit_report(
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
 
-    println!("[REPORT] Extracted: severity={}, incident_type={}, summary_len={}",
-        severity, incident_type, summary.len());
+    println!("[REPORT] Extracted: report_id={}, status={}, severity={}, incident_type={}",
+        report_id, status, severity, incident_type);
 
-    let incident_id = uuid::Uuid::new_v4().to_string();
-    let title = if !incident_type.is_empty() && incident_type != "UNKNOWN" {
-        format!("Citizen Report: {}", incident_type)
-    } else {
-        report.description.chars().take(80).collect()
-    };
+    // Only fire an alert email if this report was corroborated against the
+    // trusted incidents table. An uncorroborated report is still saved and
+    // shown to the submitter for triage, but it does NOT go out as an
+    // email alert — we have no way to know it's real, and a false alarm
+    // is worse than a delayed one.
+    if status == "corroborated" {
+        let title = if !incident_type.is_empty() && incident_type != "UNKNOWN" {
+            format!("Citizen Report: {}", incident_type)
+        } else {
+            report.description.chars().take(80).collect()
+        };
 
-    let category = report.category.unwrap_or_else(|| "citizen-report".to_string());
+        let alert_payload = serde_json::json!({
+            "report_id": report_id,
+            "title": title,
+            "description": report.description,
+            "summary": summary,
+            "recommended_actions": recommended_actions,
+            "latitude": report.latitude,
+            "longitude": report.longitude,
+            "category": category,
+            "incident_type": incident_type,
+            "severity": severity,
+            "source": "citizen-report",
+            "corroborated": true,
+        });
 
-    let alert_payload = serde_json::json!({
-        "incident_id": incident_id,
-        "title": title,
-        "description": report.description,
-        "summary": summary,
-        "recommended_actions": recommended_actions,
-        "latitude": report.latitude,
-        "longitude": report.longitude,
-        "category": category,
-        "incident_type": incident_type,
-        "severity": severity,
-        "source": "citizen-report",
-    });
+        let mail_url = format!("{}/alerts", state.mail_service_url);
+        println!("[REPORT] Corroborated — triggering mail: POST {} report_id={}", mail_url, report_id);
 
-    let mail_url = format!("{}/alerts", state.mail_service_url);
-    println!("[REPORT] Triggering mail: POST {} with incident_id={}, severity={}, type={}, lat={}, lng={}",
-        mail_url, incident_id, severity, incident_type, report.latitude, report.longitude);
-    println!("[REPORT] Full payload: {}", serde_json::to_string(&alert_payload).unwrap());
-
-    let http_client = state.http_client.clone();
-    tokio::spawn(async move {
-        println!("[REPORT] Spawned task: sending request to mail service...");
-        match http_client
-            .post(&mail_url)
-            .json(&alert_payload)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                println!("[REPORT] Mail service responded: status={}, body={}", status, body);
-                if status.is_success() {
-                    tracing::info!("Alert email triggered for citizen report {}", incident_id);
-                } else {
-                    tracing::warn!(
-                        "Mail service returned {} for citizen report {}: {}",
-                        status, incident_id, body
-                    );
+        let http_client = state.http_client.clone();
+        let report_id_for_log = report_id.clone();
+        tokio::spawn(async move {
+            match http_client
+                .post(&mail_url)
+                .json(&alert_payload)
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status_code = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    println!("[REPORT] Mail service responded: status={}, body={}", status_code, body);
+                }
+                Err(e) => {
+                    println!("[REPORT] Mail service REQUEST FAILED: {:?}", e);
+                    tracing::warn!("Failed to send alert for citizen report {}: {:?}", report_id_for_log, e);
                 }
             }
-            Err(e) => {
-                println!("[REPORT] Mail service REQUEST FAILED: {:?}", e);
-                tracing::warn!("Failed to send alert for citizen report {}: {:?}", incident_id, e);
-            }
-        }
-    });
+        });
+    } else {
+        println!("[REPORT] Status={} — not corroborated, no alert sent. Report saved for review.", status);
+    }
 
     println!("[REPORT] Returning analysis result to frontend");
     Ok(Json(result))
