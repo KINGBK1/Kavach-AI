@@ -33,7 +33,7 @@ class AppErrorBoundary extends React.Component {
       return (
         <div className="v-fatal-screen">
           <div className="v-fatal-card">
-            <h1>VARUNA could not load this screen</h1>
+            <h1>Kavach could not load this screen</h1>
             <p>{this.state.error.message || "A frontend runtime error occurred."}</p>
             <button className="v-btn v-btn-primary" onClick={() => window.location.reload()}>
               Reload

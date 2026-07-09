@@ -35,22 +35,41 @@ const UserDashboardNavbar = ({ user }) => {
 
   // Close profile dropdown when clicking outside
   useEffect(() => {
+    // Using "click" rather than "mousedown" here deliberately: mousedown
+    // fires before the profile button's own onClick (which drives
+    // toggleProfile), so with mousedown this listener and the button's
+    // click handler are two different event types racing on the same
+    // user interaction — a source of exactly the kind of "sometimes
+    // doesn't reopen" flakiness this dropdown was hitting. Both listening
+    // on "click" and firing after the button's own onClick keeps the two
+    // handlers strictly ordered instead of racing.
     const handleClickOutside = (event) => {
       if (profileRef.current && !profileRef.current.contains(event.target)) {
         setIsProfileOpen(false);
       }
     };
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
   const toggleMenu = () => {
-    setIsMenuOpen(!isMenuOpen);
+    setIsMenuOpen((prev) => !prev);
   };
 
   const toggleProfile = () => {
-    setIsProfileOpen(!isProfileOpen);
+    // Using the functional updater (prev => !prev) instead of reading
+    // `isProfileOpen` directly from closure. The direct-read version
+    // (`setIsProfileOpen(!isProfileOpen)`) captures whatever value
+    // `isProfileOpen` had when this specific render's toggleProfile was
+    // created — if the button's onClick handler ends up bound to a stale
+    // render (e.g. after the outside-click effect below closes the menu
+    // without this component re-rendering in between), the toggle can
+    // flip the wrong starting value and the dropdown stops opening until
+    // something else forces a fresh render (like a page refresh). The
+    // functional form always reads the true current state at call time,
+    // so it can't go stale regardless of which render's closure is used.
+    setIsProfileOpen((prev) => !prev);
   };
 
   const handleLogout = () => {

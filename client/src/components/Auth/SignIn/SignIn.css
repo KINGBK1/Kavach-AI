@@ -262,6 +262,14 @@ body {
   opacity: 0.85;
   transform: translateX(100px);
   animation: slideInRight 0.8s ease-out forwards;
+  /* The parent .signin-layout is a fixed 100vh grid with overflow:
+     hidden, so without this, any content taller than the viewport
+     (e.g. the judge demo section + full form + OAuth + footer) gets
+     silently clipped with no way to reach it. Scrolling only this
+     column — not the whole layout — keeps the left visuals panel fixed
+     and full-height while the form itself can grow past the fold. */
+  max-height: 100vh;
+  overflow-y: auto;
 }
 
 .signin-layout__form-container::before {
@@ -460,6 +468,40 @@ body {
   background: linear-gradient(135deg, var(--saffron) 0%, #FF7722 100%);
 }
 
+/* Judge / Hackathon Demo Access */
+.judge-demo__section {
+  margin-bottom: var(--spacing-lg);
+}
+
+.button--judge-demo {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: var(--border-radius-md);
+  cursor: pointer;
+  background: white;
+  color: var(--green);
+  border: 2px solid var(--green);
+  transition: background 0.2s ease-in-out, color 0.2s ease-in-out;
+}
+
+.button--judge-demo:hover {
+  background: var(--green);
+  color: white;
+}
+
+.judge-demo__hint {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+  text-align: center;
+}
+
 /* Message Box */
 .message-box {
   padding: 1rem;
@@ -551,6 +593,8 @@ body {
     padding: var(--spacing-lg);
     width: 100%;
     height: 100vh;
+    max-height: 100vh;
+    overflow-y: auto;
     opacity: 0.85;
     transform: none;
     animation: fadeIn 0.6s ease-in-out forwards;

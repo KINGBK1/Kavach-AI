@@ -155,6 +155,11 @@ export const AuthProvider = ({ children }) => {
     setIsAuthenticated(false);
     setUser(null);
     geolocationAttempted.current = false;
+    // Belt-and-suspenders: also cleared on every normal login path in
+    // SignIn.jsx, but clearing here too means even a programmatic logout
+    // (token expiry, manual logout button, etc) can't leave the judge
+    // banner flag dangling for whoever logs in next in this tab.
+    sessionStorage.removeItem("kavach_judge_session");
   };
 
   return (

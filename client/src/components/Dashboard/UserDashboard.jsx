@@ -33,6 +33,7 @@ import {
   Cell
 } from "recharts";
 import PageShell from "../Layout/PageShell";
+import JudgeWelcomeBanner from "./JudgeWelcomeBanner";
 import { getDashboard } from "../../api/varunaApi";
 import { lookUpLocationName } from "../../utils/geolocation";
 import { SeverityBadge } from "../common/Severity";
@@ -442,6 +443,7 @@ const UserDashboard = () => {
   return (
     <PageShell>
       <div className="v-dashboard-root">
+        <JudgeWelcomeBanner />
         {/* Header */}
         <div className="v-command-header">
           <div className="v-header-meta-group">
@@ -449,7 +451,7 @@ const UserDashboard = () => {
               <Radio size={13} className="v-pulse-icon" />
               <span>KAVACH AI AGENT ACTIVE</span>
             </div>
-            <h1 className="v-command-title">Varuna</h1>
+            <h1 className="v-command-title">Kavach</h1>
             <p className="v-command-subtitle">Emergency command system &amp; analytical matrix feed</p>
           </div>
 

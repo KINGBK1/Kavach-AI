@@ -1,0 +1,89 @@
+.v-judge-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdfa 100%);
+  border: 1px solid #a7f3d0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  position: relative;
+}
+
+.v-judge-banner__icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #10b981;
+  color: white;
+}
+
+.v-judge-banner__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.v-judge-banner__body strong {
+  font-size: 14.5px;
+  color: #065f46;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.v-judge-banner__body p {
+  font-size: 13px;
+  color: #047857;
+  line-height: 1.5;
+  margin: 4px 0;
+}
+
+.v-judge-banner__body ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+
+.v-judge-banner__body li {
+  font-size: 13px;
+  color: #065f46;
+  line-height: 1.6;
+}
+
+.v-judge-banner__note {
+  font-size: 11.5px !important;
+  color: #6b8f82 !important;
+  font-style: italic;
+  margin-top: 8px !important;
+}
+
+.v-judge-banner__close {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #10b981;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.v-judge-banner__close:hover {
+  background: rgba(16, 185, 129, 0.12);
+}
+
+@media (max-width: 640px) {
+  .v-judge-banner {
+    flex-direction: column;
+  }
+  .v-judge-banner__close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+  }
+}

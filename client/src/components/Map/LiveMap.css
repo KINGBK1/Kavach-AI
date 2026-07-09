@@ -172,6 +172,13 @@
   gap: 8px;
 }
 
+.v-time-filter-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .v-map-legend-chip {
   display: flex;
   align-items: center;
@@ -544,6 +551,32 @@
   font-size: 11px;
   color: var(--text-secondary, #64748b);
   margin-bottom: 4px;
+}
+
+.v-map-popup-status {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 99px;
+  margin-bottom: 6px;
+}
+
+.v-map-popup-status--active {
+  background: color-mix(in srgb, #16a34a 12%, white);
+  color: #15803d;
+}
+
+.v-map-popup-status--resolved {
+  background: color-mix(in srgb, #64748b 12%, white);
+  color: #475569;
+}
+
+.v-map-popup-status--unknown {
+  background: color-mix(in srgb, #94a3b8 12%, white);
+  color: #64748b;
 }
 
 .v-map-popup-time {

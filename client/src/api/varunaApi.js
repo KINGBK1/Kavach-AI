@@ -27,7 +27,7 @@ client.interceptors.request.use((config) => {
 });
 
 /** GET /incidents — raw deduplicated incidents, no AI analysis */
-export const getIncidents = async (limit = 6000) => {
+export const getIncidents = async (limit = 7000) => {
   const { data } = await client.get("/incidents", { params: { limit } });
   return Array.isArray(data) ? data : [];
 };
@@ -94,6 +94,20 @@ const buildDashboard = async () => {
       latitude: inc.latitude,
       longitude: inc.longitude,
       timestamp: inc.timestamp,
+      updated_at: inc.updated_at ?? null,
+      // --- Real lifecycle fields (see backend migration 0005) ---
+      // 'active' | 'resolved' | 'unknown' — source-native status when
+      // available (GDACS, USGS); 'unknown' for everything else.
+      status: inc.status ?? null,
+      // Source's own last-modified time, when the source provides one.
+      source_updated_at: inc.source_updated_at ?? null,
+      // Source-provided estimated/actual end of the event, when available.
+      expected_end: inc.expected_end ?? null,
+      // How many consecutive ingest cycles have re-confirmed this incident
+      // is still present in its source feed — the fallback "still active"
+      // signal for sources with no native status field.
+      confirmation_streak: inc.confirmation_streak ?? 0,
+      last_seen_at: inc.last_seen_at ?? null,
       url: inc.url,
       severity: a?.analysis?.severity ?? inc.severity ?? null,
       priority_score: a?.analysis?.priority_score ?? null,

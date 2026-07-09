@@ -1,15 +1,25 @@
-
 import React, { useState, useContext } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
 import { User, Eye, EyeOff, Shield } from "lucide-react";
 import { AuthContext } from "../../Auth/context/authContextValue";
+import { JUDGE_SESSION_FLAG } from "../../Dashboard/JudgeWelcomeBanner";
 import TriColorAnimation from "../TriColorAnimation/TriColorAnimation";
 import "./SignIn.css";
 import nightImage from "../../../assets/night-mountain-city.jpg";
 import brandLogo from "../../../assets/varuna.png";
 import { API_BASE_URL,AUTH_BASE_URL , GOOGLE_AUTH_ENABLED } from "../../../config";
+
+// Read-only-in-spirit demo account for hackathon judges/reviewers — a real
+// 'user'-role account created ahead of time in the deployed DB, not a
+// special code path. Set these to match whatever account you create.
+// If you'd rather not hardcode credentials in the client bundle at all,
+// swap this for a dedicated backend route later — see the note on
+// handleJudgeLogin above for why this is safe as a stopgap: it's exactly
+// the same login request a person would send by hand.
+const JUDGE_DEMO_USERNAME = "judge_demo";
+const JUDGE_DEMO_PASSWORD = "Kavach2026Judge!";
 
 const SignInPage = () => {
   const navigate = useNavigate();
@@ -55,6 +65,12 @@ const SignInPage = () => {
 
       // Set user name and show animation
       setUserName(res.data.user?.name || res.data.username || formData.username || "User");
+      // Any normal login explicitly clears the judge flag — prevents the
+      // judge banner from leaking to a different person who logs in
+      // normally afterward without a full page reload (sessionStorage
+      // would otherwise still have it set from an earlier judge login in
+      // this same tab).
+      sessionStorage.removeItem(JUDGE_SESSION_FLAG);
       login(res.data.token);
       setShowAnimation(true);
     } catch (err) {
@@ -71,6 +87,7 @@ const SignInPage = () => {
 
       // Set user name and show animation
       setUserName(res.data.user?.name || res.data.username || "User");
+      sessionStorage.removeItem(JUDGE_SESSION_FLAG);
       login(res.data.token);
       setShowAnimation(true);
     } catch (err) {
@@ -82,6 +99,32 @@ const SignInPage = () => {
   const handleGoogleError = (errorResponse) => {
     console.error("Google login error:", errorResponse);
     showMessage("Google login failed.", "error");
+  };
+
+  // One-click login for hackathon judges/reviewers — reuses the exact same
+  // /auth/login flow as a normal sign-in, just with pre-filled credentials
+  // for a real, ordinary 'user'-role account created ahead of time. This
+  // is not a special auth path or backdoor: it's the same request a person
+  // typing these credentials by hand would send. Exists purely to remove
+  // signup friction for time-boxed reviewers deciding whether to explore
+  // the app at all.
+  const handleJudgeLogin = async () => {
+    try {
+      const res = await axios.post(`${AUTH_BASE_URL}/auth/login`, {
+        username: JUDGE_DEMO_USERNAME,
+        password: JUDGE_DEMO_PASSWORD,
+      });
+      // Flag read by JudgeWelcomeBanner on the dashboard — set only on
+      // successful login so a failed attempt doesn't leave a stale flag
+      // behind for whatever the person does next.
+      sessionStorage.setItem(JUDGE_SESSION_FLAG, "true");
+      setUserName(res.data.user?.name || "Judge");
+      login(res.data.token);
+      setShowAnimation(true);
+    } catch (err) {
+      console.error("Judge demo login error:", err.response?.data || err.message);
+      showMessage("Demo login is temporarily unavailable — please use Sign In or Sign Up.", "error");
+    }
   };
 
   const handleAnimationComplete = () => {
@@ -130,6 +173,24 @@ const SignInPage = () => {
           </div>
           <div className="form__main">
             {message && <div className={`message-box message-box--${messageType}`}>{message}</div>}
+
+            <div className="judge-demo__section">
+              <button
+                type="button"
+                onClick={handleJudgeLogin}
+                className="button button--judge-demo"
+              >
+                <Shield size={18} />
+                Continue as Judge (Demo Access)
+              </button>
+              <p className="judge-demo__hint">
+                Reviewing for the hackathon? Skip sign-up and explore the live app instantly.
+              </p>
+              <div className="divider">
+                <span className="divider__text">or sign in normally</span>
+              </div>
+            </div>
+
             <div className="form__section">
               <div className="input__container">
                 <label htmlFor="username" className="input__label">

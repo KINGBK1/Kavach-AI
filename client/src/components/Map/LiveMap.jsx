@@ -38,6 +38,121 @@ const PROXIMITY_ALERT_RADIUS_KM = 15;
 // aren't urgent enough to interrupt the user.
 const PROXIMITY_ALERT_SEVERITIES = new Set(["High", "Critical"]);
 
+// Time-window filter options. `hours: null` means "no cutoff" (all time).
+// Order matters — this is also the display order in the filter chips.
+//
+// "Currently Active" is no longer a pure time cutoff — see
+// isIncidentActive() below for the real logic. The other buckets (Past
+// Week/Month/etc) remain honest recency windows, since there's no accurate
+// free way to know a disaster was "active" at some specific point weeks
+// ago — only whether it was reported/confirmed within that window.
+const TIME_FILTERS = [
+  {
+    key: "active",
+    label: "Currently Active",
+    hours: 48,
+    tooltip: "Confirmed ongoing by the source, or repeatedly re-confirmed present in the last 48 hours",
+  },
+  { key: "week", label: "Past Week", hours: 24 * 7, tooltip: "Reported or confirmed in the last 7 days" },
+  { key: "month", label: "Past Month", hours: 24 * 30, tooltip: "Reported or confirmed in the last 30 days" },
+  { key: "3month", label: "Past 3 Months", hours: 24 * 90, tooltip: "Reported or confirmed in the last 90 days" },
+  { key: "6month", label: "Past 6 Months", hours: 24 * 180, tooltip: "Reported or confirmed in the last 180 days" },
+  { key: "year", label: "Past Year", hours: 24 * 365, tooltip: "Reported or confirmed in the last 365 days" },
+  { key: "all", label: "All Time", hours: null, tooltip: "No time filter — every incident on record" },
+];
+const DEFAULT_TIME_FILTER = "active";
+
+// A source has to re-confirm an incident this many consecutive ingest
+// cycles (each ~30 min, see ml-services/scheduler.py) before we trust it as
+// "active" for sources with no native lifecycle field. Two cycles filters
+// out a one-off transient re-fetch while still reacting within ~1 hour of
+// a genuinely developing situation.
+const MIN_CONFIRMATION_STREAK_FOR_ACTIVE = 2;
+
+// Pulls the best available "still active" timestamp off an incident
+// record, in order of trust:
+//   1. source_updated_at — the upstream source's own last-modified time
+//      (GDACS datemodified, USGS updated). Reflects the SOURCE revising
+//      the record, the strongest signal we have.
+//   2. updated_at — our own ingest-cycle upsert time. Moves on any
+//      re-fetch, weaker than #1 but still meaningful.
+//   3. timestamp — roughly "when first reported/happened". Doesn't move
+//      once a source stops reporting the event, so it's the weakest.
+const getIncidentTimestamp = (incident) => {
+  const raw =
+    incident.source_updated_at ??
+    incident.updated_at ??
+    incident.timestamp ??
+    incident.analyzed_at ??
+    incident.created_at ??
+    incident.reported_at ??
+    null;
+  if (!raw) return null;
+  const d = new Date(typeof raw === "string" ? raw.replace(" ", "T") : raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+// The real "is this disaster currently active" check, in three tiers of
+// trust, all free:
+//
+//   Tier 1 — source-native status. GDACS publishes its own `iscurrent`
+//   flag per event; we store that directly as status='active'/'resolved'.
+//   When available, this is ground truth from the disaster-tracking source
+//   itself, not an inference we're making.
+//
+//   Tier 2 — expected_end in the future. GDACS also gives an estimated end
+//   date (`todate`) per event. If status is somehow missing but
+//   expected_end hasn't passed yet, treat it as still active.
+//
+//   Tier 3 — confirmation streak. For every other source (Reddit, Bluesky,
+//   GDELT, Google News, FIRMS — no native lifecycle field), fall back to
+//   "has this been independently re-confirmed present across multiple
+//   separate ingest cycles, recently". A single sighting isn't enough to
+//   call something active; the same event surviving several fetches is a
+//   real (if indirect) signal it's still an unfolding situation, not noise
+//   or a stale one-off report.
+//
+//   USGS earthquakes are explicitly excluded from "active" (status is
+//   hardcoded to 'resolved' at ingest — see connectors/usgs.py) since an
+//   earthquake is a point-in-time event with no "ongoing" state; they're
+//   still visible via the recency-window filters, just not tagged Active.
+const isIncidentActive = (incident) => {
+  if (incident.status === "active") return true;
+  if (incident.status === "resolved") return false;
+
+  if (incident.expected_end) {
+    const end = new Date(incident.expected_end);
+    if (!Number.isNaN(end.getTime()) && end.getTime() >= Date.now()) return true;
+  }
+
+  const streak = incident.confirmation_streak ?? 0;
+  if (streak >= MIN_CONFIRMATION_STREAK_FOR_ACTIVE) {
+    const ts = getIncidentTimestamp(incident);
+    if (ts && Date.now() - ts.getTime() <= 48 * 60 * 60 * 1000) return true;
+  }
+
+  return false;
+};
+
+// Human-readable explanation of why an incident is/isn't flagged active —
+// shown in the popup so the status badge isn't a black box. Mirrors the
+// tier order in isIncidentActive().
+const getActiveStatusLabel = (incident) => {
+  if (incident.status === "active") return { text: "Confirmed ongoing (source)", tone: "active" };
+  if (incident.status === "resolved") return { text: "Resolved / concluded", tone: "resolved" };
+  if (incident.expected_end) {
+    const end = new Date(incident.expected_end);
+    if (!Number.isNaN(end.getTime()) && end.getTime() >= Date.now()) {
+      return { text: "Active until " + end.toLocaleDateString(), tone: "active" };
+    }
+  }
+  const streak = incident.confirmation_streak ?? 0;
+  if (streak >= MIN_CONFIRMATION_STREAK_FOR_ACTIVE) {
+    return { text: `Re-confirmed ${streak}× by source`, tone: "active" };
+  }
+  return { text: "Recency-based only", tone: "unknown" };
+};
+
 const BASEMAPS = {
   streets: {
     label: "Streets",
@@ -173,6 +288,7 @@ const LiveMap = () => {
   const [error, setError] = useState(null);
   const [activeSeverities, setActiveSeverities] = useState(new Set(SEVERITY_ORDER));
   const [activeCountries, setActiveCountries] = useState(new Set());
+  const [activeTimeFilter, setActiveTimeFilter] = useState(DEFAULT_TIME_FILTER);
   const [userLocation, setUserLocation] = useState([20, 0]);
   const [locationStatus, setLocationStatus] = useState("prompt");
   const [allowGlobal, setAllowGlobal] = useState(false);
@@ -364,14 +480,34 @@ const LiveMap = () => {
     );
   }, [processedIncidents, searchTerm]);
 
+  const timeCutoff = useMemo(() => {
+    const filter = TIME_FILTERS.find((f) => f.key === activeTimeFilter);
+    if (!filter || filter.hours == null || filter.key === "active") return null;
+    return Date.now() - filter.hours * 60 * 60 * 1000;
+  }, [activeTimeFilter]);
+
   const visibleIncidents = useMemo(() => {
     return searchedIncidents.filter((i) => {
       const hasValidGeoRange = isValidCoordinateRange(i.latitude, i.longitude);
       const isSeverityActive = activeSeverities.has(i.severity);
       const isCountryActive = activeCountries.size === 0 || activeCountries.has(i.country);
-      return hasValidGeoRange && isSeverityActive && isCountryActive;
+
+      let isWithinTimeWindow = true;
+      if (activeTimeFilter === "active") {
+        // "Currently Active" uses the real status-aware check, not a flat
+        // time cutoff — see isIncidentActive() for the tiered logic.
+        isWithinTimeWindow = isIncidentActive(i);
+      } else if (timeCutoff != null) {
+        const ts = getIncidentTimestamp(i);
+        // Incidents with no parseable timestamp are excluded from anything
+        // narrower than "All Time" — we'd rather hide an ambiguous record
+        // than wrongly show a stale one.
+        isWithinTimeWindow = ts != null && ts.getTime() >= timeCutoff;
+      }
+
+      return hasValidGeoRange && isSeverityActive && isCountryActive && isWithinTimeWindow;
     });
-  }, [searchedIncidents, activeSeverities, activeCountries]);
+  }, [searchedIncidents, activeSeverities, activeCountries, timeCutoff, activeTimeFilter]);
 
   // Resolve the incident to fly to: prefer an id match against the loaded
   // list (gives us the full incident record for the popup), but fall back
@@ -417,10 +553,14 @@ const LiveMap = () => {
     setActiveSeverities(new Set(SEVERITY_ORDER));
     setActiveCountries(new Set());
     setSearchTerm("");
+    setActiveTimeFilter(DEFAULT_TIME_FILTER);
   };
 
   const hasActiveFilters =
-    activeCountries.size > 0 || activeSeverities.size < SEVERITY_ORDER.length || searchTerm.trim().length > 0;
+    activeCountries.size > 0 ||
+    activeSeverities.size < SEVERITY_ORDER.length ||
+    searchTerm.trim().length > 0 ||
+    activeTimeFilter !== DEFAULT_TIME_FILTER;
 
   // --- Proximity disaster-zone detection ----------------------------------
   // Runs whenever the user's live position or the incident list changes.
@@ -492,7 +632,9 @@ const LiveMap = () => {
           <p className="v-dash-subtitle">
             {loading
               ? "Loading incidents…"
-              : `${visibleIncidents.length} of ${incidents.length} verified incidents shown`}
+              : `${visibleIncidents.length} of ${incidents.length} verified incidents shown · ${
+                  TIME_FILTERS.find((f) => f.key === activeTimeFilter)?.label
+                }`}
             {!loading && lastUpdated && (
               <span className="v-dash-subtitle-meta">
                 <Clock size={12} /> Updated {timeAgo(lastUpdated.toISOString())}
@@ -522,6 +664,22 @@ const LiveMap = () => {
       )}
 
       <div className="v-filter-dashboard-panel">
+        <div className="v-panel-col text-left">
+          <span className="v-panel-title">Time Window</span>
+          <div className="v-map-legend v-time-filter-row">
+            {TIME_FILTERS.map((tf) => (
+              <button
+                key={tf.key}
+                className={`v-map-legend-chip ${activeTimeFilter === tf.key ? "active" : ""}`}
+                onClick={() => setActiveTimeFilter(tf.key)}
+                title={tf.tooltip}
+              >
+                <span className="v-chip-text-label">{tf.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="v-panel-col text-left">
           <span className="v-panel-title">Filter by Severity</span>
           <div className="v-map-legend">
@@ -766,6 +924,14 @@ const LiveMap = () => {
                     <div className="v-map-popup-meta v-mono">
                       {incident.category || "Unknown Category"} · {incident.source || "Unknown Source"}
                     </div>
+                    {(() => {
+                      const statusInfo = getActiveStatusLabel(incident);
+                      return (
+                        <div className={`v-map-popup-status v-map-popup-status--${statusInfo.tone}`}>
+                          {statusInfo.text}
+                        </div>
+                      );
+                    })()}
                     {incident.analyzed_at && (
                       <div className="v-map-popup-time v-mono">{timeAgo(incident.analyzed_at)}</div>
                     )}
