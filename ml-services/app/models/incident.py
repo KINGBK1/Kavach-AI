@@ -21,3 +21,11 @@ class Incident(BaseModel):
     url: str | None = None
     location: str | None = None
     country: str | None = None
+
+
+
+    status: str | None = None
+
+    source_updated_at: datetime | None = None
+
+    expected_end: datetime | None = None

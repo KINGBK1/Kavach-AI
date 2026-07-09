@@ -44,6 +44,13 @@ class USGSConnector(BaseConnector):
             else:
                 severity = "Critical"
 
+            # Earthquakes are point-in-time events — there's no "ongoing"
+            # state to track (unlike a wildfire or flood), so we explicitly
+            # mark status "resolved" rather than leaving it "unknown". This
+            # means USGS incidents rely on the recency window (timestamp vs
+            # now) for "does this still matter", not on being called
+            # "active" — which would be misleading for an event that
+            # finished the instant it happened.
             incidents.append(
                 Incident(
                     id=feature["id"],
@@ -59,6 +66,11 @@ class USGSConnector(BaseConnector):
                         tz=UTC,
                     ),
                     url=props.get("url"),
+                    status="resolved",
+                    source_updated_at=datetime.fromtimestamp(
+                        props["updated"] / 1000,
+                        tz=UTC,
+                    ) if props.get("updated") else None,
                 )
             )
 

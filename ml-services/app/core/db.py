@@ -137,6 +137,56 @@ def init_db():
         )
         """)
 
+        # `CREATE TABLE IF NOT EXISTS` above only runs the CREATE when the
+        # table doesn't exist at all — it silently does nothing if e.g. the
+        # Rust backend's sqlx migrations already created `incidents` first
+        # (its earliest migration doesn't include location/country/etc).
+        # These ADD COLUMN IF NOT EXISTS calls make init_db idempotent
+        # against a table that already exists but is missing columns this
+        # service expects, regardless of which service started first.
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS location TEXT")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS country TEXT")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS inserted_at TIMESTAMPTZ DEFAULT NOW()")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()")
+        cur.execute("ALTER TABLE analyses ADD COLUMN IF NOT EXISTS alert_sent BOOLEAN DEFAULT FALSE")
+
+        # Older databases created by the Rust migration have analyses.id as
+        # the primary key and no unique constraint on incident_id. The
+        # scheduler upserts the latest analysis by incident_id, so repair that
+        # shape here too in case the ML service starts before Rust migrations.
+        cur.execute("""
+            WITH ranked AS (
+                SELECT
+                    ctid,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY incident_id
+                        ORDER BY analyzed_at DESC NULLS LAST, ctid DESC
+                    ) AS row_num
+                FROM analyses
+            )
+            DELETE FROM analyses a
+            USING ranked r
+            WHERE a.ctid = r.ctid
+              AND r.row_num > 1
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_analyses_incident_id_unique
+                ON analyses (incident_id)
+        """)
+
+        # Disaster lifecycle columns (see backend/migrations/0005_incident_status.sql
+        # for the Rust-side equivalent — kept in sync here so this service
+        # is self-sufficient even if it starts up before the Rust backend
+        # ever runs its migrations).
+        cur.execute("""
+            ALTER TABLE incidents ADD COLUMN IF NOT EXISTS status TEXT
+                CHECK (status IN ('active', 'resolved', 'unknown'))
+        """)
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS source_updated_at TIMESTAMPTZ")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS expected_end TIMESTAMPTZ")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS confirmation_streak INTEGER NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ")
+
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_incidents_timestamp ON incidents(timestamp)"
         )
@@ -148,6 +198,9 @@ def init_db():
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_incidents_country ON incidents(country)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status)"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_analysis_history_incident_id ON analysis_history(incident_id)"

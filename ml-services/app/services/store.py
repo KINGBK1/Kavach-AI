@@ -23,7 +23,9 @@ def get_stored_incidents(limit: int = 500) -> list[dict]:
         cursor.execute(
             """
             SELECT id, source, title, description, category, latitude, longitude,
-                   severity, timestamp, url, location, country
+                   severity, timestamp, url, location, country, updated_at,
+                   status, source_updated_at, expected_end, confirmation_streak,
+                   last_seen_at
             FROM incidents
             ORDER BY timestamp DESC NULLS LAST
             LIMIT %s
@@ -46,6 +48,36 @@ def get_stored_incidents(limit: int = 500) -> list[dict]:
             "url": row["url"],
             "location": row["location"],
             "country": row["country"],
+            # Last time this exact incident row was touched by an ingest
+            # upsert (any field change or re-sight). Weaker than the fields
+            # below, kept for backward compatibility with existing callers.
+            "updated_at": _to_isoformat(row["updated_at"]),
+
+            # --- Real lifecycle fields (see migration 0005) -------------
+            # 'active' | 'resolved' | 'unknown'. Only GDACS and USGS
+            # currently set this to anything other than 'unknown' — other
+            # sources have no native concept of disaster lifecycle, so
+            # `confirmation_streak` is the fallback signal for them.
+            "status": row["status"],
+            # The *source's own* last-modified time, when the source
+            # provides one. Stronger than `updated_at` because it reflects
+            # the source revising the record, not just us re-fetching it.
+            "source_updated_at": _to_isoformat(row["source_updated_at"]),
+            # Source-provided estimated/actual end of the event, when
+            # available (GDACS only, currently). Null for point-in-time
+            # events (earthquakes) and sources without this concept.
+            "expected_end": _to_isoformat(row["expected_end"]),
+            # How many consecutive ingest cycles have re-confirmed this
+            # incident is still present in its source feed. Resets to 0 the
+            # first cycle it's absent. This is the fallback "is it still
+            # active" signal for sources without native status — a single
+            # high number means multiple independent fetches over time have
+            # kept seeing it, which is more trustworthy than one timestamp.
+            "confirmation_streak": row["confirmation_streak"],
+            # Last ingest cycle that actually saw this incident in its
+            # source feed (as opposed to `updated_at`, which also changes
+            # on unrelated field edits).
+            "last_seen_at": _to_isoformat(row["last_seen_at"]),
         }
         for row in rows
     ]
@@ -71,9 +103,18 @@ def get_stored_analyses(limit: int = 500) -> list[dict]:
 
     results = []
     for row in rows:
-        try:
-            actions = json.loads(row["recommended_actions"]) if row["recommended_actions"] else []
-        except (TypeError, ValueError):
+        raw_actions = row["recommended_actions"]
+        # Same defensive handling as retriever.py's parse_result — most
+        # rows are a JSON string needing loads(), but don't silently
+        # discard real data if a row already comes back as a list.
+        if isinstance(raw_actions, list):
+            actions = raw_actions
+        elif raw_actions:
+            try:
+                actions = json.loads(raw_actions)
+            except (TypeError, ValueError):
+                actions = []
+        else:
             actions = []
         results.append(
             {
@@ -127,6 +168,12 @@ def save_incidents(incidents: list[Incident]):
 
     print(f"[STORE] saving {len(incidents)} incidents...", flush=True)
 
+    # Group incoming incidents by source so the "missed this cycle" decay
+    # step below only resets streaks for sources we actually just fetched.
+    # Without this, one connector failing/returning nothing in a cycle
+    # would wrongly reset every OTHER source's streaks too.
+    sources_in_this_batch = {i.source for i in incidents}
+
     with get_conn() as conn:
         cursor = conn.cursor()
 
@@ -147,13 +194,26 @@ def save_incidents(incidents: list[Incident]):
                     i.url,
                     location,
                     country,
+                    i.status,
+                    i.source_updated_at.isoformat() if i.source_updated_at else None,
+                    i.expected_end.isoformat() if i.expected_end else None,
                 )
             )
 
+        # Every incident in this batch was just re-confirmed present in its
+        # source feed, so:
+        #   - on first insert: confirmation_streak starts at 1, last_seen_at = NOW()
+        #   - on conflict (already existed): confirmation_streak increments,
+        #     last_seen_at bumps to NOW()
+        # `status`/`source_updated_at`/`expected_end` use COALESCE so a
+        # cycle where the source temporarily omits these fields doesn't
+        # blow away a previously-known value.
         cursor.executemany("""
             INSERT INTO incidents
-            (id, source, title, description, category, latitude, longitude, severity, timestamp, url, location, country)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (id, source, title, description, category, latitude, longitude, severity,
+             timestamp, url, location, country, status, source_updated_at, expected_end,
+             confirmation_streak, last_seen_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, NOW())
             ON CONFLICT (id) DO UPDATE SET
                 source = EXCLUDED.source,
                 title = EXCLUDED.title,
@@ -166,8 +226,31 @@ def save_incidents(incidents: list[Incident]):
                 url = COALESCE(EXCLUDED.url, incidents.url),
                 location = COALESCE(EXCLUDED.location, incidents.location),
                 country = COALESCE(EXCLUDED.country, incidents.country),
+                status = COALESCE(EXCLUDED.status, incidents.status),
+                source_updated_at = COALESCE(EXCLUDED.source_updated_at, incidents.source_updated_at),
+                expected_end = COALESCE(EXCLUDED.expected_end, incidents.expected_end),
+                confirmation_streak = incidents.confirmation_streak + 1,
+                last_seen_at = NOW(),
                 updated_at = NOW()
         """, values)
+
+        # Decay pass: any incident belonging to a source we fetched this
+        # cycle, but that did NOT appear in this batch, just failed to be
+        # re-confirmed — reset its streak to 0. It stays in the table (we
+        # don't delete history) but drops out of "confirmed active" status.
+        # Scoped to `source = ANY(%s)` so this never touches sources that
+        # simply weren't part of this particular fetch_all() run.
+        seen_ids = [i.id for i in incidents]
+        cursor.execute(
+            """
+            UPDATE incidents
+            SET confirmation_streak = 0
+            WHERE source = ANY(%s)
+              AND id != ALL(%s)
+              AND confirmation_streak != 0
+            """,
+            (list(sources_in_this_batch), seen_ids),
+        )
 
     print(f"[STORE] saved {len(incidents)} incidents", flush=True)
 

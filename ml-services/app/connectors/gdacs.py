@@ -77,6 +77,32 @@ class GDACSConnector(BaseConnector):
                 except Exception:
                     pass
 
+            # --- Real lifecycle fields, straight from GDACS -------------
+            # GDACS is one of the only free sources that actually tracks
+            # whether a disaster is ongoing. `iscurrent` is a string
+            # "true"/"false" in their API, not a real bool, so compare
+            # case-insensitively against the string rather than relying on
+            # Python truthiness of the string itself (which would treat
+            # "false" as truthy since it's a non-empty string).
+            iscurrent_raw = str(props.get("iscurrent", "")).strip().lower()
+            if iscurrent_raw == "true":
+                status = "active"
+            elif iscurrent_raw == "false":
+                status = "resolved"
+            else:
+                status = "unknown"
+
+            def _parse_gdacs_dt(value):
+                if not value:
+                    return None
+                try:
+                    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                except Exception:
+                    return None
+
+            source_updated_at = _parse_gdacs_dt(props.get("datemodified"))
+            expected_end = _parse_gdacs_dt(props.get("todate"))
+
             incidents.append(
                 Incident(
                     id=str(props.get("eventid", "")),
@@ -89,6 +115,9 @@ class GDACSConnector(BaseConnector):
                     severity=props.get("alertlevel"),
                     timestamp=timestamp,
                     url=url,
+                    status=status,
+                    source_updated_at=source_updated_at,
+                    expected_end=expected_end,
                 )
             )
 

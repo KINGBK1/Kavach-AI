@@ -179,12 +179,31 @@ def parse_result(row: Any) -> dict[str, Any]:
         "country": incident.country,
     }
     if analysis is not None:
+        raw_actions = analysis.recommended_actions
+        # Defensive: recommended_actions is declared TEXT and is normally
+        # written via json.dumps() (see store.py save_analysis()), so it's
+        # a JSON string that needs loads(). But some rows — likely written
+        # before this codebase settled on that convention, or via a path
+        # that bound a native list directly — come back from the DB
+        # already deserialized as a Python list. Handle both shapes rather
+        # than assuming one, so a handful of old/irregular rows don't 500
+        # the whole chat endpoint.
+        if isinstance(raw_actions, list):
+            parsed_actions = raw_actions
+        elif raw_actions:
+            try:
+                parsed_actions = json.loads(raw_actions)
+            except (TypeError, ValueError):
+                parsed_actions = []
+        else:
+            parsed_actions = []
+
         result.update({
             "incident_type": analysis.incident_type,
             "priority_score": analysis.priority_score,
             "confidence": analysis.confidence,
             "summary": analysis.summary,
-            "recommended_actions": json.loads(analysis.recommended_actions) if analysis.recommended_actions else [],
+            "recommended_actions": parsed_actions,
         })
     else:
         result.update({
