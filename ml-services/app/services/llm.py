@@ -1,96 +1,54 @@
-# import time
-
-# from app.core.config import client, MODEL_NAME
-
-
-# def ask_llm(system_prompt: str, user_prompt: str):
-#     start = time.perf_counter()
-
-#     response = client.chat(
-#         model=MODEL_NAME,
-#         messages=[
-#             {
-#                 "role": "system",
-#                 "content": system_prompt,
-#             },
-#             {
-#                 "role": "user",
-#                 "content": user_prompt,
-#             },
-#         ],
-#     )
-
-#     elapsed = round((time.perf_counter() - start) * 1000)
-
-#     return {
-#         "response": response.message.content,
-#         "processing_time_ms": elapsed,
-#         "model": MODEL_NAME,
-#     }
-
-# services/llm.py
 import time
 from app.core.config import client, MODEL_NAME
 
-
-def _extract_text(response):
-    if response is None:
-        return ""
-
-    if hasattr(response, "text") and response.text:
-        return response.text
-
-    if hasattr(response, "output_text") and response.output_text:
-        return response.output_text
-
-    if hasattr(response, "output"):
-        output = response.output
-        if isinstance(output, list) and output:
-            first = output[0]
-            if isinstance(first, dict) and "content" in first:
-                content = first["content"]
-                if isinstance(content, list) and content:
-                    first_content = content[0]
-                    if isinstance(first_content, dict) and "text" in first_content:
-                        return first_content["text"]
-                    if isinstance(first_content, str):
-                        return first_content
-
-    return str(response)
+MAX_RETRIES = 2
+BASE_BACKOFF = 2.0
 
 
 def ask_llm(system_prompt: str, user_prompt: str):
     start = time.perf_counter()
 
-    raw_text = ""
+    for attempt in range(1 + MAX_RETRIES):
+        try:
+            stream = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                max_completion_tokens=4096,
+                reasoning_effort="medium",
+                stream=True,
+                stop=None,
+            )
 
-    try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=user_prompt,
-            config={
-                "system_instruction": system_prompt,
-                "temperature": 0.2,
-                "response_mime_type": "application/json",
-            }
-        )
-        raw_text = _extract_text(response)
-    except Exception:
-        # fallback to more permissive plain text response if JSON generation fails
-        fallback = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=user_prompt,
-            config={
-                "system_instruction": system_prompt,
-                "temperature": 0.2,
-            }
-        )
-        raw_text = _extract_text(fallback)
+            raw_text = ""
+            for chunk in stream:
+                content = chunk.choices[0].delta.content or ""
+                raw_text += content
+
+            elapsed = round((time.perf_counter() - start) * 1000)
+
+            print(f"[LLM] model={MODEL_NAME} attempt={attempt} "
+                  f"elapsed={elapsed}ms "
+                  f"raw_response={raw_text[:800]}", flush=True)
+
+            if raw_text.strip():
+                return {
+                    "response": raw_text,
+                    "processing_time_ms": elapsed,
+                    "model": MODEL_NAME,
+                }
+        except Exception as e:
+            print(f"[LLM] attempt {attempt} failed: {e}", flush=True)
+            if attempt < MAX_RETRIES:
+                time.sleep(BASE_BACKOFF * (attempt + 1))
 
     elapsed = round((time.perf_counter() - start) * 1000)
-
+    print(f"[LLM] all {MAX_RETRIES + 1} attempts exhausted, returning empty", flush=True)
     return {
-        "response": raw_text,
+        "response": "",
         "processing_time_ms": elapsed,
         "model": MODEL_NAME,
     }

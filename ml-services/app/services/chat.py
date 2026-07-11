@@ -4,8 +4,11 @@ from app.services.llm import ask_llm
 from app.services.query_parser import parse_query
 from app.services.retriever import retrieve_incidents
 
-CHAT_SYSTEM_PROMPT = """/no_think
-You are VARUNA AI, an emergency response analyst.
+CHAT_SYSTEM_PROMPT = """You are VARUNA AI, an emergency response analyst.
+
+Your thinking/reasoning is separate from your final output. In your final
+output, return ONLY valid JSON — no markdown, no backticks, no explanation,
+no text before or after. Start with { and end with }.
 
 You will receive a set of disaster incidents and the user's question, along
 with the parsed filters (location, category, time range) that were already
@@ -104,19 +107,21 @@ User Question:
         result = ask_llm(CHAT_SYSTEM_PROMPT, user_prompt)
 
         raw = result["response"].strip()
+        print(f"[CHAT] LLM response ({len(raw)} chars): {raw[:600]}", flush=True)
+
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError:
+            print(f"[CHAT] first parse OK", flush=True)
+        except json.JSONDecodeError as e1:
+            print(f"[CHAT] first parse failed: {e1}, trying _extract_json...", flush=True)
             cleaned = _extract_json(raw)
+            print(f"[CHAT] cleaned text ({len(cleaned)} chars): {cleaned[:400]}", flush=True)
             try:
                 data = json.loads(cleaned)
-            except json.JSONDecodeError:
-                # Never hand the user raw model output here — if both parse
-                # attempts failed, `raw` is unstructured and, worse, may be
-                # a wall of scraped source text (headlines, RSS fragments)
-                # that leaked in through a bad retrieval match rather than
-                # anything Gemini actually said. Fail safely instead.
-                print(f"[CHAT] JSON parse failed twice, raw (truncated): {raw[:200]}", flush=True)
+                print(f"[CHAT] second parse OK", flush=True)
+            except json.JSONDecodeError as e2:
+                print(f"[CHAT] second parse failed: {e2}", flush=True)
+                print(f"[CHAT] full raw: {raw[:1000]}", flush=True)
                 return {
                     "answer": (
                         "I couldn't form a clean answer from the matching incidents. "
