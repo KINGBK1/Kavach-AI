@@ -6,6 +6,10 @@ export const API_ORIGIN = trimApiBase(
     "http://localhost:8080"
 );
 
+console.log(VITE_VARUNA_API_URL);
+console.log(VITE_BACKEND_URL);
+
+
 export const API_BASE_URL = `${API_ORIGIN}/api`;
 
 // Separate origin for the standalone Node auth server (google-login quickfix).
