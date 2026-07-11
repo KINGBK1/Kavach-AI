@@ -26,7 +26,7 @@ def analyze(incident: IncidentRequest):
 
 class CitizenReportRequest(IncidentRequest):
     category: str | None = None
-    reported_by: str | None = None  # user id from the JWT, passed through by Rust
+    reported_by: str | None = None  
 
 
 @router.post("/citizen-report")
