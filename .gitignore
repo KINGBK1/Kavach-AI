@@ -28,7 +28,7 @@ out/
 # Database files
 *.sqlite
 *.db
-*.sql
+
 
 # OS files
 .DS_Store
