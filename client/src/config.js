@@ -6,12 +6,12 @@ export const API_ORIGIN = trimApiBase(
     "http://localhost:8080"
 );
 
-console.log(import.meta.env.VITE_VARUNA_API_URL);
-console.log(import.meta.env.VITE_BACKEND_URL);
-console.log("API_ORIGIN:", API_ORIGIN);
-console.log("API_BASE_URL:", API_BASE_URL);
-console.log("AUTH_BASE_URL:", AUTH_BASE_URL);
-console.log("VITE_AUTH_URL:", import.meta.env.VITE_AUTH_URL);
+// console.log(import.meta.env.VITE_VARUNA_API_URL);
+// console.log(import.meta.env.VITE_BACKEND_URL);
+// console.log("API_ORIGIN:", API_ORIGIN);
+// console.log("API_BASE_URL:", API_BASE_URL);
+// console.log("AUTH_BASE_URL:", AUTH_BASE_URL);
+// console.log("VITE_AUTH_URL:", import.meta.env.VITE_AUTH_URL);
 
 
 export const API_BASE_URL = `${API_ORIGIN}/api`;
