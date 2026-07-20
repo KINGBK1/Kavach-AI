@@ -1,3 +1,6 @@
+import asyncio
+import logging
+
 from fastapi import APIRouter, Query, HTTPException
 from app.models.request import IncidentRequest
 from app.models.incident import Incident
@@ -10,10 +13,13 @@ from app.services.citizen_reports import (
     get_citizen_reports,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(
     prefix="/analyze",
     tags=["Analysis"]
 )
+
 
 @router.post("")
 def analyze(incident: IncidentRequest):
@@ -26,11 +32,11 @@ def analyze(incident: IncidentRequest):
 
 class CitizenReportRequest(IncidentRequest):
     category: str | None = None
-    reported_by: str | None = None  
+    reported_by: str | None = None
 
 
 @router.post("/citizen-report")
-def analyze_citizen_report(report: CitizenReportRequest):
+async def analyze_citizen_report(report: CitizenReportRequest):
     allowed, recent_count = check_rate_limit(report.reported_by)
     if not allowed:
         raise HTTPException(
@@ -42,22 +48,41 @@ def analyze_citizen_report(report: CitizenReportRequest):
 
     print(f"[ML-CITIZEN] Received citizen report: lat={report.latitude}, lng={report.longitude}, category={category}", flush=True)
 
-    throwaway_incident = Incident(
-        id="citizen-pending",
-        source="citizen-report",
-        title=report.description[:80] if report.description else "Citizen Report",
-        description=report.description,
-        category=category,
-        latitude=report.latitude,
-        longitude=report.longitude,
-        severity=None,
-        timestamp=None,
-        url=None,
-        location=None,
-        country=None,
-    )
-    result = analyze_fetched_incident(throwaway_incident)
+    # Try ADK agent first, fall back to direct LLM call
+    result = None
+    adk_succeeded = False
+    try:
+        from app.agents.analysis_agent import run_adk_analysis
+        result = await run_adk_analysis(
+            description=report.description,
+            latitude=report.latitude,
+            longitude=report.longitude,
+            category=category,
+        )
+        adk_succeeded = True
+        print(f"[ML-CITIZEN] ADK agent analysis complete", flush=True)
+    except Exception as e:
+        logger.warning(f"ADK agent failed, falling back to direct analysis: {e}")
+        print(f"[ML-CITIZEN] ADK agent failed: {e} — falling back", flush=True)
 
+    if not adk_succeeded:
+        throwaway = Incident(
+            id="citizen-pending",
+            source="citizen-report",
+            title=report.description[:80] if report.description else "Citizen Report",
+            description=report.description,
+            category=category,
+            latitude=report.latitude,
+            longitude=report.longitude,
+            severity=None,
+            timestamp=None,
+            url=None,
+            location=None,
+            country=None,
+        )
+        result = analyze_fetched_incident(throwaway)
+
+    # Corroboration is always SQL-based — reliable, deterministic
     corroborating = find_corroborating_incidents(report.latitude, report.longitude, category)
     status = "corroborated" if corroborating else "unverified"
 
