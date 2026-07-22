@@ -88,7 +88,7 @@ def list_citizen_reports(status: str | None = Query(default=None), limit: int = 
 
 
 @router.get("/all")
-def analyze_all(limit: int = Query(default=50, ge=1, le=20000)):
+def analyze_all(limit: int = Query(default=50, ge=1, le=50000)):
     return get_stored_analyses(limit=limit)
 
 @router.get("/dashboard")

@@ -27,7 +27,7 @@ client.interceptors.request.use((config) => {
 });
 
 /** GET /incidents — raw deduplicated incidents, no AI analysis */
-export const getIncidents = async (limit = 20000) => {
+export const getIncidents = async (limit = 50000) => {
   const { data } = await client.get("/incidents", { params: { limit } });
   return Array.isArray(data) ? data : [];
 };

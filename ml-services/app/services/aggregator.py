@@ -4,6 +4,7 @@ from app.connectors.usgs import USGSConnector
 from app.connectors.gdacs import GDACSConnector
 from app.connectors.gdelt_news import GDELTNewsConnector
 from app.connectors.google_news import GoogleNewsConnector
+from app.connectors.indian_news import IndianNewsConnector
 from app.connectors.reliefweb import ReliefWebConnector
 from app.connectors.bluesky import BlueskyConnector
 from app.connectors.firms import FIRMSConnector
@@ -23,6 +24,12 @@ class IncidentAggregator:
             ("gdacs", lambda: GDACSConnector()),
             ("gdelt_news", lambda: GDELTNewsConnector()),
             ("google_news", lambda: GoogleNewsConnector()),  # capped to 100 below like other sources; lower the [:100] slice if you want fewer to conserve LLM quota
+            # Same free RSS endpoint, region-targeted to India (gl=IN, hl=en-IN)
+            # so India-specific disaster coverage isn't drowned out by the
+            # global feed above — Google News ranks results per-region, so a
+            # global query alone under-represents local Indian outlets.
+            ("google_news_india", lambda: GoogleNewsConnector(language="en-IN", country="IN")),
+            ("indian_news", lambda: IndianNewsConnector()),  # already category-filtered inside normalize(), so no need to touch the [:100] slice logic
             ("reliefweb", lambda: ReliefWebConnector()),
             ("firms", lambda: FIRMSConnector()),
             ("bluesky", lambda: (BlueskyConnector(), "flood")),
