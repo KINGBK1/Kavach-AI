@@ -9,62 +9,59 @@ import {
   Clock,
   MapPin,
   RefreshCw,
+  Eye,
+  Sparkles,
+  Hourglass,
 } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { getCitizenReports } from "../../api/varunaApi";
 import { SeverityBadge, PriorityScore, ConfidenceBadge } from "../common/Severity";
-// Reuses Reports.css directly rather than duplicating the verification-badge/
-// sources-list styles — this page shows the exact same agent-reasoning UI
-// that already exists in the citizen-report submission modal, just for
-// every report instead of only the one just submitted.
 import "../Reports/Reports.css";
-import "./TrustLedger.css";
+import "../TrustLedger/TrustLedger.css";
+import "./ReviewQueue.css";
 
-const STATUS_FILTERS = [
-  { key: null, label: "All" },
-  { key: "verified", label: "Verified" },
-  { key: "unverified", label: "Unverified" },
-  { key: "rejected", label: "Rejected" },
-];
-
-const TrustLedger = () => {
+const ReviewQueue = () => {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [statusFilter, setStatusFilter] = useState(null);
 
-  const load = useCallback(async (status) => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getCitizenReports({ status, limit: 100 });
+      const data = await getCitizenReports({ status: "unverified", limit: 50 });
       setReports(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Failed to load citizen reports:", err);
-      setError("Couldn't load the trust ledger. Check the backend is reachable.");
+      console.error("Failed to load review queue:", err);
+      setError("Couldn't load the review queue. Check the backend is reachable.");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { load(statusFilter); }, [load, statusFilter]);
+  useEffect(() => { load(); }, [load]);
+
+  const sorted = [...reports].sort((a, b) => {
+    const aConf = a.analysis?.confidence ?? 0;
+    const bConf = b.analysis?.confidence ?? 0;
+    return bConf - aConf;
+  });
 
   return (
     <PageShell>
       <div className="v-trust-ledger">
         <div className="v-trust-ledger-header">
           <div>
-            <h1>Trust Ledger</h1>
+            <h1>Review Queue</h1>
             <p>
-              Every citizen report is checked by an AI verification agent —
-              it searches for recent news coverage and cross-references our
-              trusted incident database before deciding. This page shows
-              every decision and the evidence behind it, not just the verdict.
+              Citizen reports that the verification agent couldn't confidently confirm or reject.
+              Medium-confidence reports are flagged "likely real" and should be reviewed first.
+              Use this queue to triage and promote genuine reports into the trusted incidents table.
             </p>
           </div>
           <button
             className="v-trust-ledger-refresh"
-            onClick={() => load(statusFilter)}
+            onClick={load}
             disabled={loading}
           >
             <RefreshCw size={14} className={loading ? "v-spin" : ""} />
@@ -72,57 +69,55 @@ const TrustLedger = () => {
           </button>
         </div>
 
-        <div className="v-trust-ledger-filters">
-          {STATUS_FILTERS.map((f) => (
-            <button
-              key={f.label}
-              className={`v-trust-ledger-filter ${statusFilter === f.key ? "active" : ""}`}
-              onClick={() => setStatusFilter(f.key)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-
         {loading && <div className="v-trust-ledger-state">Loading…</div>}
         {error && <div className="v-trust-ledger-state v-trust-ledger-error">{error}</div>}
         {!loading && !error && reports.length === 0 && (
-          <div className="v-trust-ledger-state">No reports match this filter yet.</div>
+          <div className="v-trust-ledger-state">
+            <ShieldCheck size={32} style={{ marginBottom: 8, opacity: 0.3 }} />
+            <p>No unverified reports in the queue.</p>
+          </div>
         )}
 
+        <div className="v-review-queue-summary">
+          <div className="v-review-summary-card">
+            <Hourglass size={16} />
+            <span>Total pending</span>
+            <strong>{reports.length}</strong>
+          </div>
+          <div className="v-review-summary-card priority">
+            <Sparkles size={16} />
+            <span>Likely real (≥40% confidence)</span>
+            <strong>{reports.filter((r) => (r.analysis?.confidence ?? 0) >= 0.4).length}</strong>
+          </div>
+        </div>
+
         <div className="v-trust-ledger-list">
-          {reports.map((report) => {
+          {sorted.map((report) => {
             const analysis = report.analysis || {};
             const verification = analysis.verification || {};
-            const isVerified = verification.is_verified ?? report.status === "verified";
+            const confidence = analysis.confidence ?? 0;
+            const isLikelyReal = confidence >= 0.4;
             const sourcesChecked = verification.sources_checked || [];
             const webSummary = verification.web_search_summary || "";
 
             return (
-              <div key={report.id} className="v-trust-ledger-card">
+              <div
+                key={report.id}
+                className={`v-trust-ledger-card v-review-card ${isLikelyReal ? "v-review-card-priority" : ""}`}
+              >
+                {isLikelyReal && (
+                  <span className="v-review-priority-tag">
+                    <Sparkles size={12} /> Likely real
+                  </span>
+                )}
+
                 <div className="v-trust-ledger-card-top">
-                  <div
-                    className={`v-verification-badge ${
-                      isVerified ? "v-verification-badge--verified" : "v-verification-badge--rejected"
-                    }`}
-                  >
-                    {isVerified ? (
-                      <>
-                        <ShieldCheck size={18} />
-                        <div>
-                          <strong>Verified</strong>
-                          <span>Web sources confirm this event</span>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <AlertCircle size={18} />
-                        <div>
-                          <strong>Rejected</strong>
-                          <span>No evidence found</span>
-                        </div>
-                      </>
-                    )}
+                  <div className="v-verification-badge v-verification-badge--rejected">
+                    <Hourglass size={18} />
+                    <div>
+                      <strong>Unverified</strong>
+                      <span>Awaiting human review</span>
+                    </div>
                   </div>
                   <span className="v-trust-ledger-time">
                     <Clock size={12} /> {new Date(report.created_at).toLocaleString()}
@@ -131,7 +126,7 @@ const TrustLedger = () => {
 
                 <div className="v-critical-card-top">
                   <SeverityBadge severity={analysis.severity} size="sm" />
-                  <ConfidenceBadge confidence={analysis.confidence} />
+                  <ConfidenceBadge confidence={confidence} />
                   <PriorityScore score={analysis.priority_score} severity={analysis.severity} />
                 </div>
 
@@ -190,4 +185,4 @@ const TrustLedger = () => {
   );
 };
 
-export default TrustLedger;
+export default ReviewQueue;

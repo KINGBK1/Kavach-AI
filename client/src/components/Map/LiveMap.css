@@ -430,6 +430,15 @@
   color: var(--accent-blue, #2563eb);
 }
 
+.v-map-layer-menu-section {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary, #94a3b8);
+  padding: 6px 10px 2px;
+}
+
 /* ==========================================================================
    MINI LEGEND (persistent, bottom-left of map)
    ========================================================================== */
@@ -622,12 +631,14 @@
    RESPONSIVE
    ========================================================================== */
 
-@media (max-width: 1100px) {
+@media (max-width: 1300px) {
+  .v-filter-dashboard-panel {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+@media (max-width: 900px) {
   .v-filter-dashboard-panel {
     grid-template-columns: 1fr 1fr;
-  }
-  .v-filter-dashboard-panel .v-panel-col:last-child {
-    grid-column: 1 / -1;
   }
 }
 

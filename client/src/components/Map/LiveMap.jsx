@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Rectangle, Popup, useMap } from "react-leaflet";
 import { useLocation } from "react-router-dom";
 import {
   RefreshCw,
@@ -16,7 +16,7 @@ import {
   LocateFixed
 } from "lucide-react";
 import PageShell from "../Layout/PageShell";
-import { getDashboard, invalidateDashboardCache } from "../../api/varunaApi";
+import { getDashboard, getRiskZones, invalidateDashboardCache } from "../../api/varunaApi";
 import { SeverityBadge } from "../common/Severity";
 import { SEVERITY_ORDER } from "../common/severityConfig";
 import ProximityAlertModal from "./ProximityAlertModal";
@@ -295,6 +295,8 @@ const LiveMap = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [basemap, setBasemap] = useState("streets");
   const [showLayerMenu, setShowLayerMenu] = useState(false);
+  const [showRiskZones, setShowRiskZones] = useState(false);
+  const [riskZones, setRiskZones] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -431,6 +433,12 @@ const LiveMap = () => {
     requestLocation();
     load();
   }, [load, requestLocation]);
+
+  // Fetch historical risk-zone data once on mount. This is a static aggregate
+  // (counts by grid cell + category + month) so it doesn't need auto-refresh.
+  useEffect(() => {
+    getRiskZones(2.0).then(setRiskZones).catch(() => {});
+  }, []);
 
   // Auto-refresh every 3 minutes so the map stays live without manual polling.
   useEffect(() => {
@@ -732,6 +740,27 @@ const LiveMap = () => {
 
         <div className="v-panel-col text-left">
           <div className="v-panel-title-wrapper">
+            <span className="v-panel-title">Historical Risk</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              className={`v-map-legend-chip ${showRiskZones ? "active" : ""}`}
+              onClick={() => setShowRiskZones((v) => !v)}
+              style={{ "--chip-color": "#dc2626" }}
+            >
+              <span className="v-map-legend-dot" />
+              <span className="v-chip-text-label">{showRiskZones ? "Hiding" : "Show"} historical risk zones</span>
+            </button>
+            {showRiskZones && (
+              <span className="v-dash-subtitle-meta" style={{ fontSize: 10 }}>
+                for {["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][new Date().getMonth() + 1]}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="v-panel-col text-left">
+          <div className="v-panel-title-wrapper">
             <span className="v-panel-title">Filter by Country</span>
             {activeCountries.size > 0 && (
               <button className="v-panel-reset-btn" onClick={() => setActiveCountries(new Set())}>
@@ -782,6 +811,7 @@ const LiveMap = () => {
             </button>
             {showLayerMenu && (
               <div className="v-map-layer-menu">
+                <div className="v-map-layer-menu-section">Base map</div>
                 {Object.entries(BASEMAPS).map(([key, cfg]) => (
                   <button
                     key={key}
@@ -794,6 +824,7 @@ const LiveMap = () => {
                     {cfg.label}
                   </button>
                 ))}
+                
               </div>
             )}
           </div>
@@ -863,8 +894,68 @@ const LiveMap = () => {
           {hasPendingFocus && focusIncident && <FlyToIncident incident={focusIncident} />}
           {hasPendingFocus && selectedIncident && <FlyToIncident incident={selectedIncident} />}
 
+          {/* Historical risk-zone overlay — aggregated incident counts by
+               grid cell, category, and month. No ML, just honest counting.
+               Color intensity = proportion of historical incidents in this
+               cell vs the globally densest cell. */}
+          {showRiskZones && riskZones.length > 0 && (() => {
+            const currentMonth = new Date().getMonth() + 1;
+            const monthNames = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const cellBuckets = {};
+            let maxCount = 0;
+            riskZones.forEach((z) => {
+              if (z.month !== currentMonth) return;
+              const key = `${z.lat_bucket},${z.lng_bucket}`;
+              if (!cellBuckets[key]) {
+                cellBuckets[key] = { lat: z.lat_bucket, lng: z.lng_bucket, count: 0, categories: {} };
+              }
+              cellBuckets[key].count += z.count;
+              cellBuckets[key].categories[z.category] = (cellBuckets[key].categories[z.category] || 0) + z.count;
+              if (cellBuckets[key].count > maxCount) maxCount = cellBuckets[key].count;
+            });
+            const gridHalf = 1.0;
+            return Object.values(cellBuckets).map((cell) => {
+              if (cell.count === 0) return null;
+              const intensity = cell.count / maxCount;
+              const r = Math.round(180 - intensity * 120);
+              const g = Math.round(40 - intensity * 20);
+              const b = Math.round(40 - intensity * 30);
+              const opacity = 0.25 + intensity * 0.55;
+              const strokeOpacity = 0.3 + intensity * 0.5;
+              return (
+                <Rectangle
+                  key={`risk-${cell.lat}-${cell.lng}`}
+                  bounds={[[cell.lat - gridHalf, cell.lng - gridHalf], [cell.lat + gridHalf, cell.lng + gridHalf]]}
+                  pathOptions={{
+                    color: `rgba(${r}, ${g}, ${b}, ${strokeOpacity})`,
+                    fillColor: `rgba(${r}, ${g}, ${b}, ${opacity})`,
+                    fillOpacity: opacity,
+                    weight: 1.5,
+                  }}
+                >
+                  <Popup>
+                    <div className="v-map-popup">
+                      <strong>Historical Risk Zone</strong>
+                      <div className="v-map-popup-meta v-mono">
+                        {monthNames[currentMonth]} · {cell.lat.toFixed(1)}°, {cell.lng.toFixed(1)}°
+                      </div>
+                      <div className="v-map-popup-desc">
+                        {cell.count} historical incident{cell.count !== 1 ? "s" : ""} in this area during {monthNames[currentMonth]}
+                      </div>
+                      {Object.entries(cell.categories).sort((a, b) => b[1] - a[1]).map(([cat, cnt]) => (
+                        <div key={cat} className="v-map-popup-meta v-mono" style={{ fontSize: 10, marginTop: 2 }}>
+                          {cat}: {cnt}
+                        </div>
+                      ))}
+                    </div>
+                  </Popup>
+                </Rectangle>
+              );
+            });
+          })()}
+
           {/* User's own live location — a distinct marker + accuracy halo
-              so it's visually obvious which dot is "you" versus incidents. */}
+               so it's visually obvious which dot is "you" versus incidents. */}
           {locationStatus === "granted" && liveUserCoords && (
             <>
               <CircleMarker

@@ -71,6 +71,18 @@ export const SeverityBreakdownBar = ({ breakdown = {} }) => {
 };
 
 /** Simple horizontal bar list for category / source breakdowns */
+/** Confidence score badge — colored by confidence level */
+export const ConfidenceBadge = ({ confidence }) => {
+  if (confidence == null) return null;
+  const pct = Math.round(confidence * 100);
+  const level = confidence >= 0.7 ? "high" : confidence >= 0.4 ? "medium" : "low";
+  return (
+    <span className={`v-confidence-badge v-confidence-${level}`} title={`Agent confidence: ${pct}%`}>
+      {pct}% confidence
+    </span>
+  );
+};
+
 export const RankedBarList = ({ data = {}, accent = "var(--v-primary)" }) => {
   const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
   const max = entries.length ? entries[0][1] : 0;

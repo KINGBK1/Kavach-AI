@@ -1,9 +1,10 @@
+import math
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter
-from sqlalchemy import desc, func, select
+from fastapi import APIRouter, Query
+from sqlalchemy import desc, func, select, text
 
-from app.core.db import get_session
+from app.core.db import get_conn, get_session
 from app.core.models import AnalysisModel, IncidentModel
 
 router = APIRouter(
@@ -96,3 +97,60 @@ def countries():
         rows = session.execute(stmt).all()
 
     return {row.country or "Unknown": row.count for row in rows}
+
+
+@router.get("/risk-zones")
+def risk_zones(grid_size: float = Query(default=2.0, ge=0.5, le=10.0)):
+    """
+    Aggregate all historical incidents by grid cell (lat_bucket, lng_bucket),
+    category, and calendar month. Returns data suitable for rendering a
+    historical risk heat overlay on the map — no ML, just honest counting.
+
+    Each result cell includes:
+      - lat_bucket, lng_bucket: center of the grid cell
+      - category: incident category
+      - month: calendar month (1-12)
+      - count: how many incidents of this category occurred in this cell+month
+      - total: total incidents in this cell across all categories
+    """
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT
+                ROUND(latitude / {grid_size}) * {grid_size} AS lat_bucket,
+                ROUND(longitude / {grid_size}) * {grid_size} AS lng_bucket,
+                category,
+                EXTRACT(MONTH FROM timestamp)::int AS month,
+                COUNT(*) AS count
+            FROM incidents
+            WHERE latitude IS NOT NULL
+              AND longitude IS NOT NULL
+              AND timestamp IS NOT NULL
+            GROUP BY lat_bucket, lng_bucket, category, month
+            ORDER BY count DESC
+            """
+        )
+        rows = cursor.fetchall()
+
+    if not rows:
+        return []
+
+    totals = {}
+    for r in rows:
+        key = (r["lat_bucket"], r["lng_bucket"])
+        totals[key] = totals.get(key, 0) + r["count"]
+
+    result = []
+    for r in rows:
+        key = (r["lat_bucket"], r["lng_bucket"])
+        result.append({
+            "lat_bucket": float(r["lat_bucket"]),
+            "lng_bucket": float(r["lng_bucket"]),
+            "category": r["category"],
+            "month": r["month"],
+            "count": r["count"],
+            "total_in_cell": totals[key],
+        })
+
+    return result

@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { getAllSources, getAllAnalyses, analyzeIncident } from "../../api/varunaApi";
-import { SeverityBadge, PriorityScore } from "../common/Severity";
+import { SeverityBadge, PriorityScore, ConfidenceBadge } from "../common/Severity";
 import { SEVERITY_ORDER } from "../common/severityConfig";
 import "./Reports.css";
 
@@ -213,6 +213,7 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
 
             <div className="v-critical-card-top">
               <SeverityBadge severity={result.analysis.severity} />
+              <ConfidenceBadge confidence={result.analysis.confidence} />
               <PriorityScore score={result.analysis.priority_score} severity={result.analysis.severity} />
             </div>
             <h4>{result.analysis.incident_type}</h4>

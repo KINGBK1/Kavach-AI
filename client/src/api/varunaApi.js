@@ -225,6 +225,18 @@ export const SEVERITY_COLORS = {
   Critical: "#dc2626",
 };
 
+/**
+ * GET /dashboard/risk-zones — historical incident aggregation by grid cell,
+ * category, and month. Used by the map's "Historical Risk" overlay.
+ * Returns data for rendering a transparent-to-opaque heat overlay showing
+ * regions with historically higher incident density in the current or
+ * selected month.
+ */
+export const getRiskZones = async (gridSize = 2.0) => {
+  const { data } = await client.get("/dashboard/risk-zones", { params: { grid_size: gridSize } });
+  return Array.isArray(data) ? data : [];
+};
+
 /** PATCH /auth/profile — update lat/lng and preferences */
 export const updateProfile = async ({ latitude, longitude, preferences }) => {
   console.log("[updateProfile] → PATCH /auth/profile", { latitude, longitude, preferences });

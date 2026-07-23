@@ -193,6 +193,18 @@ impl AiClient {
         Ok(response)
     }
 
+    pub async fn get_risk_zones(&self, grid_size: f64) -> Result<Value> {
+        let url = format!("{}/analytics/risk-zones", self.base_url);
+        let response = self.client
+            .get(&url)
+            .query(&[("grid_size", grid_size)])
+            .send()
+            .await?
+            .json::<Value>()
+            .await?;
+        Ok(response)
+    }
+
     pub async fn health(&self) -> Result<Value> {
         let url = format!("{}/health", self.base_url);
         let response = self.client

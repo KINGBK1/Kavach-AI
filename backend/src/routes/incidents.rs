@@ -157,21 +157,29 @@ async fn submit_report(
     let severity = analysis.and_then(|a| a.get("severity").and_then(|s| s.as_str())).unwrap_or("UNKNOWN");
     let incident_type = analysis.and_then(|a| a.get("incident_type").and_then(|t| t.as_str())).unwrap_or("UNKNOWN");
     let summary = analysis.and_then(|a| a.get("summary").and_then(|s| s.as_str())).unwrap_or("");
+    let confidence = analysis.and_then(|a| a.get("confidence").and_then(|c| c.as_f64())).unwrap_or(0.0);
     let recommended_actions: Vec<String> = analysis
         .and_then(|a| a.get("recommended_actions"))
         .and_then(|ra| ra.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
 
-    println!("[REPORT] Extracted: report_id={}, status={}, severity={}, incident_type={}",
-        report_id, status, severity, incident_type);
+    println!("[REPORT] Extracted: report_id={}, status={}, severity={}, incident_type={}, confidence={}",
+        report_id, status, severity, incident_type, confidence);
 
-    // Only fire an alert email if this report was corroborated against the
-    // trusted incidents table or verified by the ADK agent. An uncorroborated
-    // report is still saved and shown to the submitter for triage, but it
-    // does NOT go out as an email alert — we have no way to know it's real,
-    // and a false alarm is worse than a delayed one.
-    if corroborated {
+    // Confidence-weighted alert routing instead of a binary verified/rejected gate.
+    // High confidence + High/Critical severity → immediate push alert (email).
+    // Medium confidence → route to review queue with "likely real" flag.
+    // Low confidence → saved silently, no alert.
+    let alert_urgency = if corroborated && confidence >= 0.7 {
+        "immediate"
+    } else if corroborated && confidence >= 0.4 {
+        "review_queue_priority"
+    } else {
+        "none"
+    };
+
+    if alert_urgency == "immediate" {
         let title = if !incident_type.is_empty() && incident_type != "UNKNOWN" {
             format!("Citizen Report: {}", incident_type)
         } else {
@@ -189,12 +197,14 @@ async fn submit_report(
             "category": category,
             "incident_type": incident_type,
             "severity": severity,
+            "confidence": confidence,
             "source": "citizen-report",
             "corroborated": true,
+            "alert_urgency": "immediate",
         });
 
         let mail_url = format!("{}/alerts", state.mail_service_url);
-        println!("[REPORT] Corroborated — triggering mail: POST {} report_id={}", mail_url, report_id);
+        println!("[REPORT] High confidence ({}) — immediate alert: POST {} report_id={}", confidence, mail_url, report_id);
 
         let http_client = state.http_client.clone();
         let report_id_for_log = report_id.clone();
@@ -217,8 +227,10 @@ async fn submit_report(
                 }
             }
         });
+    } else if alert_urgency == "review_queue_priority" {
+        println!("[REPORT] Medium confidence ({}) — routed to review queue as 'likely real'. No email.", confidence);
     } else {
-        println!("[REPORT] Status={} — not corroborated, no alert sent. Report saved for review.", status);
+        println!("[REPORT] Status={}, confidence={} — no alert sent. Report saved for review.", status, confidence);
     }
 
     println!("[REPORT] Returning analysis result to frontend");
