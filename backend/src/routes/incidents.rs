@@ -25,7 +25,36 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/", get(get_incidents))
         .route("/analyze", get(analyze_incidents))
         .route("/report", post(submit_report))
+        .route("/citizen-reports", get(list_citizen_reports))
         .with_state(state)
+}
+
+#[derive(Deserialize)]
+pub struct CitizenReportsQuery {
+    pub status: Option<String>,
+    pub limit: Option<u32>,
+}
+
+/// Public, unauthenticated — this is the trust ledger: anyone can see what
+/// the verification agent decided on a citizen report and why. Read-only,
+/// no per-user data exposed beyond what's already public on submission.
+async fn list_citizen_reports(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<CitizenReportsQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    let limit = params.limit.unwrap_or(100);
+
+    let client = AiClient::new(state.ai_service_url.clone());
+
+    let reports = client
+        .list_citizen_reports(params.status.as_deref(), limit)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to list citizen reports: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(reports))
 }
 
 async fn get_incidents(

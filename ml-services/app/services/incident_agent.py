@@ -14,16 +14,23 @@ from app.core.config import MODEL_NAME
 
 
 def _search_web(query: str) -> str:
-    """Search the web for news articles about this incident to verify if it's real.
-    
-    Call this tool to find real news coverage, official reports, or social media
-    posts about the incident. Use the description and location as the query.
-    
+    """Search the web for RECENT news articles (published in the last few
+    days) about this incident to verify if it's real.
+
+    Call this tool to find real, current news coverage, official reports,
+    or social media posts about the incident. Use the description and
+    location as the query. Results are restricted to recent publications —
+    an empty result means no recent coverage was found, not that the topic
+    has never been covered (older, unrelated historical coverage is
+    deliberately excluded so it can't be mistaken for evidence of a
+    CURRENT event).
+
     Args:
         query: A detailed search query combining the incident description and location
     Returns:
-        A JSON string with search results: each result has title, url, and snippet fields.
-        Returns empty string if no results or if search is unavailable.
+        A JSON string with search results: each result has title, url,
+        published (date), and snippet fields. Returns empty string if no
+        recent results or if search is unavailable.
     """
     return exa_search(query)
 

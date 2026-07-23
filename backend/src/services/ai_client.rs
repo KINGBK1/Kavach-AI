@@ -134,6 +134,29 @@ impl AiClient {
         Ok(value)
     }
 
+    /// Public, read-only list of citizen reports and how the verification
+    /// agent judged each one — powers the frontend's trust ledger. Not
+    /// gated by role: showing what the agent decided and why is the point,
+    /// not something to hide behind auth.
+    pub async fn list_citizen_reports(&self, status: Option<&str>, limit: u32) -> Result<Value> {
+        let mut url = format!("{}/analyze/citizen-reports?limit={}", self.base_url, limit);
+        if let Some(s) = status {
+            url = format!("{}&status={}", url, s);
+        }
+
+        let response = self.client.get(&url).send().await?;
+        let status_code = response.status();
+        let text = response.text().await.unwrap_or_default();
+
+        if !status_code.is_success() {
+            return Err(anyhow!("AI service /analyze/citizen-reports failed {}: {}", status_code, text));
+        }
+
+        serde_json::from_str::<Value>(&text).map_err(|err| {
+            anyhow!("AI service /analyze/citizen-reports response decode failed: {} - body: {}", err, text)
+        })
+    }
+
     pub async fn chat(&self, question: &str) -> Result<ChatResponse> {
         let url = format!("{}/chat", self.base_url);
         let body = ChatRequest {

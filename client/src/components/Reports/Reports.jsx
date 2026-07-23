@@ -430,7 +430,7 @@ const Reports = () => {
         </div>
         <div className="v-dash-header-actions">
           <button className="v-btn" onClick={() => setShowModal(true)}>
-            <Plus size={16} /> Analyze one
+            <Plus size={16} /> Report an Incident
           </button>
           <button className="v-btn v-btn-primary" onClick={runFreshAnalysis} disabled={analyzing}>
             {analyzing ? <span className="v-loading-spinner" /> : <Zap size={16} />}

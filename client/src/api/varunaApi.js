@@ -60,6 +60,15 @@ export const submitReport = async ({ description, latitude, longitude, category 
   return data;
 };
 
+/** Public trust ledger — every citizen report and how the verification
+ * agent judged it. No auth required: GET /incidents/citizen-reports. */
+export const getCitizenReports = async ({ status, limit = 100 } = {}) => {
+  const params = { limit };
+  if (status) params.status = status;
+  const { data } = await client.get("/incidents/citizen-reports", { params });
+  return data;
+};
+
 /**
  * There is no /analyze/dashboard endpoint on the real backend.
  * Build the same shape the Dashboard/Alerts pages expect by combining

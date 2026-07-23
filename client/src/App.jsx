@@ -12,6 +12,7 @@ import LiveMap from './components/Map/LiveMap';
 import Alerts from './components/Alerts/Alerts';
 import ProfileSettings from './components/Profile/ProfileSettings';
 import Chat from './components/Chat/Chat';
+import TrustLedger from './components/TrustLedger/TrustLedger';
 import { GOOGLE_AUTH_ENABLED, GOOGLE_CLIENT_ID } from './config';
 
 class AppErrorBoundary extends React.Component {
@@ -80,6 +81,7 @@ const App = () => {
               <Route path="/incidents" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
               <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
               <Route path="/profile-settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+              <Route path="/trust-ledger" element={<ProtectedRoute><TrustLedger /></ProtectedRoute>} />
               
               {/* Redirects and Fallbacks */}
               <Route path="/reports" element={<Navigate to="/incidents" replace />} />

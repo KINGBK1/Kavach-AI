@@ -12,6 +12,7 @@ import {
   LogOut,
   ChevronDown,
   Activity,
+  ShieldCheck,
 } from "lucide-react";
 import { useNavigate, Link, NavLink } from "react-router-dom";
 import { AuthContext } from "../../Auth/context/authContextValue";
@@ -92,6 +93,7 @@ const UserDashboardNavbar = ({ user }) => {
     { name: "Alerts", icon: AlertTriangle, href: "/alerts" },
     { name: "Incidents", icon: Activity, href: "/incidents" },
     { name: "Ask Kavach", icon: MessageSquare, href: "/chat" },
+    { name: "Trust Ledger", icon: ShieldCheck, href: "/trust-ledger" },
   ];
 
   return (
