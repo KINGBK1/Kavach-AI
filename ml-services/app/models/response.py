@@ -1,4 +1,4 @@
-# models/response.py
+from typing import Optional
 from pydantic import BaseModel
 
 
@@ -9,3 +9,4 @@ class IncidentResponse(BaseModel):
     confidence: float
     summary: str
     recommended_actions: list[str]
+    verification: Optional[dict] = None

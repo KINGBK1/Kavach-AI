@@ -14,6 +14,9 @@ load_dotenv()
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "bishalapac")
 LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 MODEL_NAME = "gemini-2.5-flash-lite"
+EXA_API_KEY = os.getenv("EXA_API_KEY", "")
+
+os.environ.setdefault("GOOGLE_GENAI_USE_ENTERPRISE", "TRUE")
 
 client = genai.Client(
     vertexai=True,

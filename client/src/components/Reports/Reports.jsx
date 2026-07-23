@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   Search,
   Zap,
@@ -10,7 +10,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  Sparkles
+  Sparkles,
+  Globe,
+  Database,
+  Brain,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  FileText,
+  Link2,
+  ShieldCheck,
+  Radio,
+  Satellite,
+  BookOpen,
 } from "lucide-react";
 import PageShell from "../Layout/PageShell";
 import { getAllSources, getAllAnalyses, analyzeIncident } from "../../api/varunaApi";
@@ -34,6 +46,13 @@ const formatDate = (ts) => {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 };
 
+const AGENT_STEPS = [
+  { id: "search", icon: Globe, label: "Searching web sources..." },
+  { id: "db", icon: Database, label: "Checking incident database..." },
+  { id: "analyze", icon: Brain, label: "Analyzing with AI..." },
+  { id: "verify", icon: ShieldCheck, label: "Verifying & saving..." },
+];
+
 const ManualAnalyzeModal = ({ onClose, onResult }) => {
   const [description, setDescription] = useState("");
   const [latitude, setLatitude] = useState("");
@@ -41,11 +60,26 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [activeStep, setActiveStep] = useState(0);
+  const stepTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (!loading) {
+      setActiveStep(0);
+      return;
+    }
+    const advance = () => {
+      setActiveStep((prev) => Math.min(prev + 1, AGENT_STEPS.length - 1));
+    };
+    stepTimerRef.current = setInterval(advance, 2500);
+    return () => clearInterval(stepTimerRef.current);
+  }, [loading]);
 
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setActiveStep(0);
     try {
       const res = await analyzeIncident({
         description,
@@ -66,6 +100,10 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
     }
   };
 
+  const isVerified = result?.analysis?.verification?.is_verified ?? (result?.status === "corroborated" || result?.status === "verified");
+  const sourcesChecked = result?.analysis?.verification?.sources_checked || [];
+  const webSummary = result?.analysis?.verification?.web_search_summary || "";
+
   return (
     <div className="v-modal-backdrop" onClick={onClose}>
       <div className="v-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
@@ -74,7 +112,7 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
           <button className="v-modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
 
-        {!result ? (
+        {!result && !loading && (
           <form onSubmit={submit} className="v-modal-form">
             <label>
               Description
@@ -116,37 +154,122 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
               {loading ? "Analyzing…" : "Run analysis"}
             </button>
           </form>
-        ) : (
+        )}
+
+        {loading && (
+          <div className="v-agent-steps">
+            {AGENT_STEPS.map((step, i) => {
+              const StepIcon = step.icon;
+              const isActive = i === activeStep;
+              const isDone = i < activeStep;
+              const isPending = i > activeStep;
+              return (
+                <div
+                  key={step.id}
+                  className={`v-agent-step ${isActive ? "v-agent-step--active" : ""} ${isDone ? "v-agent-step--done" : ""} ${isPending ? "v-agent-step--pending" : ""}`}
+                >
+                  <div className="v-agent-step-icon">
+                    {isDone ? (
+                      <CheckCircle2 size={18} className="v-step-check" />
+                    ) : isActive ? (
+                      <Loader2 size={18} className="v-step-spinner" />
+                    ) : (
+                      <StepIcon size={18} className="v-step-icon" />
+                    )}
+                  </div>
+                  <div className="v-agent-step-content">
+                    <span className="v-agent-step-label">{step.label}</span>
+                    {isActive && <span className="v-agent-step-sub">Processing...</span>}
+                    {isDone && <span className="v-agent-step-sub">Complete</span>}
+                  </div>
+                  {isActive && <div className="v-agent-step-bar" />}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {result && !loading && (
           <div className="v-modal-result">
-            {result.status === "corroborated" ? (
-              <div className="v-citizen-confirmation v-citizen-confirmation--corroborated">
-                <Sparkles size={16} />
-                <span>
-                  Matched against {result.corroborating_incidents?.length || 1} nearby confirmed
-                  incident{(result.corroborating_incidents?.length || 1) > 1 ? "s" : ""} — a resident alert was triggered.
-                </span>
-              </div>
-            ) : (
-              <div className="v-citizen-confirmation v-citizen-confirmation--pending">
-                <AlertCircle size={16} />
-                <span>
-                  No matching confirmed incident found yet. Your report has been saved and
-                  queued for review — it won't trigger an alert until it's verified.
-                </span>
-              </div>
-            )}
+            <div className={`v-verification-badge ${isVerified ? "v-verification-badge--verified" : "v-verification-badge--rejected"}`}>
+              {isVerified ? (
+                <>
+                  <ShieldCheck size={20} />
+                  <div>
+                    <strong>Verified Incident</strong>
+                    <span>Web sources confirm this event</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <AlertCircle size={20} />
+                  <div>
+                    <strong>Unverified Report</strong>
+                    <span>No web evidence found</span>
+                  </div>
+                </>
+              )}
+            </div>
+
             <div className="v-critical-card-top">
               <SeverityBadge severity={result.analysis.severity} />
               <PriorityScore score={result.analysis.priority_score} severity={result.analysis.severity} />
             </div>
             <h4>{result.analysis.incident_type}</h4>
             <p>{result.analysis.summary}</p>
+
             {!!result.analysis.recommended_actions?.length && (
-              <ul className="v-critical-card-actions">
-                {result.analysis.recommended_actions.map((a, i) => <li key={i}>{a}</li>)}
-              </ul>
+              <div className="v-sources-section">
+                <div className="v-sources-section-header">
+                  <FileText size={14} />
+                  <span>Recommended Actions</span>
+                </div>
+                <ul className="v-critical-card-actions">
+                  {result.analysis.recommended_actions.map((a, i) => <li key={i}>{a}</li>)}
+                </ul>
+              </div>
             )}
-            <div className="v-timeline-time v-mono">
+
+            {sourcesChecked.length > 0 && (
+              <div className="v-sources-section">
+                <div className="v-sources-section-header">
+                  <BookOpen size={14} />
+                  <span>Sources Checked ({sourcesChecked.length})</span>
+                </div>
+                <div className="v-sources-list">
+                  {sourcesChecked.map((url, i) => {
+                    const domain = url.replace(/^https?:\/\//, "").split("/")[0];
+                    return (
+                      <a
+                        key={i}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="v-source-item"
+                        style={{ animationDelay: `${i * 80}ms` }}
+                      >
+                        <Link2 size={12} />
+                        <span>{domain}</span>
+                        <ExternalLink size={10} className="v-source-external" />
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {webSummary && (
+              <div className="v-sources-section v-web-summary">
+                <div className="v-sources-section-header">
+                  <Globe size={14} />
+                  <span>Web Search Summary</span>
+                </div>
+                <p>{webSummary}</p>
+              </div>
+            )}
+
+            <div className="v-timeline-time v-mono" style={{ marginTop: 12 }}>
+              <Radio size={12} />
               {result.metadata?.model} · {(result.metadata?.processing_time_ms / 1000).toFixed(1)}s
             </div>
             <button className="v-btn" onClick={onClose} style={{ marginTop: 14 }}>Close</button>

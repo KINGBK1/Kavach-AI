@@ -120,6 +120,10 @@ async fn submit_report(
         .unwrap_or("unverified")
         .to_string();
 
+    // Old endpoint returned "corroborated", the ADK agent returns "verified".
+    // Both mean the same thing: this report has been cross-checked and confirmed.
+    let corroborated = status == "corroborated" || status == "verified";
+
     let analysis = result.get("analysis").and_then(|a| a.as_object());
     let severity = analysis.and_then(|a| a.get("severity").and_then(|s| s.as_str())).unwrap_or("UNKNOWN");
     let incident_type = analysis.and_then(|a| a.get("incident_type").and_then(|t| t.as_str())).unwrap_or("UNKNOWN");
@@ -134,11 +138,11 @@ async fn submit_report(
         report_id, status, severity, incident_type);
 
     // Only fire an alert email if this report was corroborated against the
-    // trusted incidents table. An uncorroborated report is still saved and
-    // shown to the submitter for triage, but it does NOT go out as an
-    // email alert — we have no way to know it's real, and a false alarm
-    // is worse than a delayed one.
-    if status == "corroborated" {
+    // trusted incidents table or verified by the ADK agent. An uncorroborated
+    // report is still saved and shown to the submitter for triage, but it
+    // does NOT go out as an email alert — we have no way to know it's real,
+    // and a false alarm is worse than a delayed one.
+    if corroborated {
         let title = if !incident_type.is_empty() && incident_type != "UNKNOWN" {
             format!("Citizen Report: {}", incident_type)
         } else {

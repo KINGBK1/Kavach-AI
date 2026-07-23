@@ -9,6 +9,8 @@ from app.services.citizen_reports import (
     save_citizen_report,
     get_citizen_reports,
 )
+from app.services.incident_agent import run_agent
+from app.core.config import MODEL_NAME
 
 router = APIRouter(
     prefix="/analyze",
@@ -30,7 +32,7 @@ class CitizenReportRequest(IncidentRequest):
 
 
 @router.post("/citizen-report")
-def analyze_citizen_report(report: CitizenReportRequest):
+async def analyze_citizen_report(report: CitizenReportRequest):
     allowed, recent_count = check_rate_limit(report.reported_by)
     if not allowed:
         raise HTTPException(
@@ -42,43 +44,81 @@ def analyze_citizen_report(report: CitizenReportRequest):
 
     print(f"[ML-CITIZEN] Received citizen report: lat={report.latitude}, lng={report.longitude}, category={category}", flush=True)
 
-    throwaway_incident = Incident(
-        id="citizen-pending",
-        source="citizen-report",
-        title=report.description[:80] if report.description else "Citizen Report",
-        description=report.description,
-        category=category,
-        latitude=report.latitude,
-        longitude=report.longitude,
-        severity=None,
-        timestamp=None,
-        url=None,
-        location=None,
-        country=None,
-    )
-    result = analyze_fetched_incident(throwaway_incident)
+    try:
+        agent_result = await run_agent(
+            description=report.description,
+            latitude=report.latitude,
+            longitude=report.longitude,
+            category=category,
+            reported_by=str(report.reported_by) if report.reported_by else "anonymous",
+        )
+        print(f"[ML-CITIZEN] Agent result: status={agent_result.get('status')}", flush=True)
+    except Exception as e:
+        print(f"[ML-CITIZEN] ADK agent failed, falling back to direct LLM: {e}", flush=True)
+        throwaway_incident = Incident(
+            id="citizen-pending",
+            source="citizen-report",
+            title=report.description[:80] if report.description else "Citizen Report",
+            description=report.description,
+            category=category,
+            latitude=report.latitude,
+            longitude=report.longitude,
+            severity=None,
+            timestamp=None,
+            url=None,
+            location=None,
+            country=None,
+        )
+        fallback = analyze_fetched_incident(throwaway_incident)
 
-    corroborating = find_corroborating_incidents(report.latitude, report.longitude, category)
-    status = "corroborated" if corroborating else "unverified"
+        corroborating = find_corroborating_incidents(report.latitude, report.longitude, category)
+        fallback_status = "corroborated" if corroborating else "unverified"
+
+        report_id = save_citizen_report(
+            description=report.description,
+            latitude=report.latitude,
+            longitude=report.longitude,
+            category=category,
+            analysis=fallback["analysis"],
+            reported_by=report.reported_by,
+            status=fallback_status,
+        )
+
+        return {
+            "report_id": report_id,
+            "status": fallback_status,
+            "corroborating_incidents": corroborating,
+            "analysis": fallback["analysis"],
+            "metadata": fallback["metadata"],
+        }
+
+    analysis = agent_result.get("analysis", {})
+    verification = analysis.get("verification", {})
+
+    is_verified = verification.get("is_verified", False)
+    status = "verified" if is_verified else "rejected"
+
+    sources_checked = verification.get("sources_checked", [])
+    corroborating = agent_result.get("corroborating_incidents", [])
 
     report_id = save_citizen_report(
         description=report.description,
         latitude=report.latitude,
         longitude=report.longitude,
         category=category,
-        analysis=result["analysis"],
+        analysis=analysis,
         reported_by=report.reported_by,
         status=status,
     )
 
-    print(f"[ML-CITIZEN] Saved report {report_id} as status={status} ({len(corroborating)} corroborating incidents)", flush=True)
+    print(f"[ML-CITIZEN] Saved report {report_id} as status={status} ({len(sources_checked)} sources)", flush=True)
 
     return {
         "report_id": report_id,
         "status": status,
         "corroborating_incidents": corroborating,
-        "analysis": result["analysis"],
-        "metadata": result["metadata"],
+        "analysis": analysis,
+        "metadata": {"model": MODEL_NAME, "processing_time_ms": 0},
     }
 
 
