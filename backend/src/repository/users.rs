@@ -159,6 +159,28 @@ impl UserRepository {
         Ok(())
     }
 
+    pub async fn list_all(&self) -> Result<Vec<User>> {
+        let sql = format!(
+            "SELECT {} FROM users ORDER BY created_at DESC",
+            Self::SELECT_COLS
+        );
+        let users = sqlx::query_as::<_, User>(&sql)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(users)
+    }
+
+    pub async fn list_pending(&self) -> Result<Vec<User>> {
+        let sql = format!(
+            "SELECT {} FROM users WHERE NOT is_approved ORDER BY created_at DESC",
+            Self::SELECT_COLS
+        );
+        let users = sqlx::query_as::<_, User>(&sql)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(users)
+    }
+
     pub async fn update_profile(
         &self,
         id: Uuid,

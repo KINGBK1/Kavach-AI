@@ -9,6 +9,7 @@ from google.adk.runners import InMemoryRunner
 from google.adk.tools.function_tool import FunctionTool
 
 from app.connectors.web_search import web_search as exa_search
+from app.connectors.weather import WeatherConnector
 from app.services.citizen_reports import find_corroborating_incidents
 from app.core.config import MODEL_NAME
 
@@ -35,6 +36,38 @@ def _search_web(query: str) -> str:
     return exa_search(query)
 
 
+def _get_weather(latitude: float, longitude: float) -> str:
+    """Get current weather conditions at the incident location.
+
+    Call this tool to check if weather conditions intensify or mitigate
+    the reported incident. For example, high wind + low humidity worsens
+    a wildfire; heavy ongoing rain validates a flood report.
+
+    Args:
+        latitude: Latitude of the incident
+        longitude: Longitude of the incident
+    Returns:
+        A JSON string with temperature, humidity, precipitation, wind,
+        and weather code, or empty string if unavailable.
+    """
+    try:
+        connector = WeatherConnector()
+        weather = connector.fetch(latitude, longitude)
+        if weather is None:
+            return json.dumps({"error": "Weather data unavailable"})
+        return json.dumps({
+            "temperature_c": weather.temperature,
+            "humidity_pct": weather.humidity,
+            "precipitation_mm": weather.precipitation,
+            "rain_mm": weather.rain,
+            "wind_speed_kmh": weather.wind_speed,
+            "weather_code": weather.weather_code,
+        })
+    except Exception as e:
+        print(f"  [agent] Weather fetch failed: {e}")
+        return json.dumps({"error": str(e)})
+
+
 def _check_db(latitude: float, longitude: float, category: str) -> str:
     """Check the database for trusted/confirmed incidents near these coordinates.
     
@@ -56,26 +89,56 @@ def _check_db(latitude: float, longitude: float, category: str) -> str:
         return json.dumps([])
 
 
-AGENT_INSTRUCTION = """You are VARUNA AI's incident verification agent. Your ONLY job is to analyze citizen reports and determine if they are real using web search and database evidence.
+AGENT_INSTRUCTION = """You are VARUNA AI's incident verification agent. Your ONLY job is to analyze citizen reports and determine if they are real using web search, weather context, and database evidence.
 
 YOUR WORKFLOW — follow EXACTLY:
-1. Call web_search() with a query combining the description and location
-2. Call check_db() with the latitude, longitude, and category
-3. Analyze ALL evidence and decide the verdict
-4. Output ONLY valid JSON — NO other text
+1. Call web_search() with a query combining the description and location — search for recent news
+2. Call get_weather() to get current weather conditions at the location
+3. Call check_db() with the latitude, longitude, and category
+4. Analyze ALL evidence and decide the verdict
+5. Output ONLY valid JSON — NO other text
 
 ABSOLUTE RULES — you MUST obey:
 - You MUST call web_search() at least once
+- You MUST call get_weather() at least once
 - You MUST call check_db() at least once
 - Your final output MUST be ONLY the JSON object below — nothing else
 - NO introductory text, NO explanation, NO markdown, NO ```json markers
 - The JSON MUST be valid and complete
 - If you output anything other than pure JSON, the system will break
 
+EVIDENCE WEIGHTING FOR CONFIDENCE:
+- Web search with 2+ recent relevant articles: strong evidence (+0.3 to confidence)
+- Web search with 1 relevant article: moderate evidence (+0.15)
+- DB corroboration (trusted source nearby): strong evidence (+0.25 each)
+- Weather context that matches the incident type (e.g. heavy rain for flood, high wind for cyclone): supporting evidence (+0.1)
+- Weather context that contradicts the incident type (e.g. clear skies for flood): reduces confidence (-0.15)
+- Multiple sources agreeing: confidence multiplier
+
+CONFIDENCE CALIBRATION — be honest, not inflated:
+- 0.8-1.0: Multiple independent confirmations (web articles AND DB records AND weather matches)
+- 0.6-0.79: One strong source confirmed + weather matches or partial web coverage
+- 0.4-0.59: One source found but limited; or weather strongly matches but no source
+- 0.2-0.39: Weak or indirect evidence; single source of limited relevance
+- 0.0-0.19: No evidence found; both web and DB returned nothing
+
 DECISION LOGIC:
 - status = 'verified' if web search finds real news articles OR DB has corroborating incidents nearby
 - status = 'rejected' if BOTH web search AND DB return nothing
+- The confidence score should reflect HOW MUCH evidence was found, not just a binary yes/no
 - Set verification.is_verified based on the same logic
+
+SEVERITY CALIBRATION:
+- Incorporate weather data: flood + heavy rain = Critical; fire + high wind + low humidity = Critical
+- Consider the description's own urgency signals
+- A cyclone by itself is at least High; with corroboration and matching weather = Critical
+
+PRIORITY SCORE (0-100):
+- Combine severity + confidence + weather severity_multiplier
+- Critical severity should be 75-100
+- High severity should be 50-74
+- Moderate severity should be 25-49
+- Low severity should be 0-24
 
 OUTPUT ONLY THIS JSON — NOTHING ELSE:
 {
@@ -91,7 +154,8 @@ OUTPUT ONLY THIS JSON — NOTHING ELSE:
         "verification": {
             "web_search_summary": "",
             "sources_checked": [],
-            "is_verified": true or false
+            "is_verified": true or false,
+            "weather_at_location": ""
         }
     }
 }"""
@@ -103,6 +167,7 @@ root_agent = Agent(
     instruction=AGENT_INSTRUCTION,
     tools=[
         FunctionTool(_search_web),
+        FunctionTool(_get_weather),
         FunctionTool(_check_db),
     ],
 )
@@ -172,6 +237,7 @@ Reported By: {reported_by or 'anonymous'}"""
                     "web_search_summary": "",
                     "sources_checked": [],
                     "is_verified": False,
+                    "weather_at_location": "",
                 },
             },
         }

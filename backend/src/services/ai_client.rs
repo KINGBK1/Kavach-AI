@@ -193,6 +193,25 @@ impl AiClient {
         Ok(response)
     }
 
+    /// Generic POST that sends JSON and returns JSON — used by promote/reject
+    /// actions that don't need their own dedicated method.
+    pub async fn post_json(&self, path: &str, body: Value) -> Result<Value> {
+        let url = format!("{}{}", self.base_url, path);
+        let response = self.client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?;
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(anyhow!("POST {} failed {}: {}", path, status, text));
+        }
+        serde_json::from_str::<Value>(&text).map_err(|err| {
+            anyhow!("POST {} decode failed: {} - body: {}", path, err, text)
+        })
+    }
+
     pub async fn get_risk_zones(&self, grid_size: f64) -> Result<Value> {
         let url = format!("{}/analytics/risk-zones", self.base_url);
         let response = self.client

@@ -6,7 +6,6 @@ import UserDashboard from './components/Dashboard/UserDashboard';
 import SignIn from './components/Auth/SignIn/SignIn';
 import Reports from './components/Reports/Reports';
 import { AuthProvider } from './components/Auth/context/AuthContext';
-// Import the ProtectedRoute component (adjust the path if necessary)
 import ProtectedRoute from './components/Auth/ProtectedRoute'; 
 import LiveMap from './components/Map/LiveMap';
 import Alerts from './components/Alerts/Alerts';
@@ -14,6 +13,8 @@ import ProfileSettings from './components/Profile/ProfileSettings';
 import Chat from './components/Chat/Chat';
 import TrustLedger from './components/TrustLedger/TrustLedger';
 import ReviewQueue from './components/ReviewQueue/ReviewQueue';
+import AdminDashboard from './components/Admin/AdminDashboard';
+import { ToastProvider } from './components/Toast/ToastContext';
 import { GOOGLE_AUTH_ENABLED, GOOGLE_CLIENT_ID } from './config';
 
 class AppErrorBoundary extends React.Component {
@@ -50,15 +51,8 @@ class AppErrorBoundary extends React.Component {
 }
 
 const Providers = ({ children }) => {
-  if (!GOOGLE_AUTH_ENABLED) {
-    return children;
-  }
-
-  return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      {children}
-    </GoogleOAuthProvider>
-  );
+  if (!GOOGLE_AUTH_ENABLED) return children;
+  return <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{children}</GoogleOAuthProvider>;
 };
 
 const App = () => {
@@ -66,30 +60,33 @@ const App = () => {
     <AppErrorBoundary>
       <Providers>
         <AuthProvider>
-          <Router>
-            <Routes>
-              {/* Public Routes */}
-              <Route path="/signup" element={<SignUpPage />} />
-              <Route path="/signin" element={<SignIn />} />
-              
-              {/* Root Redirect */}
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <ToastProvider>
+            <Router>
+              <Routes>
+                {/* Public Routes */}
+                <Route path="/signup" element={<SignUpPage />} />
+                <Route path="/signin" element={<SignIn />} />
+                
+                {/* Root Redirect */}
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-              {/* Protected Routes */}
-              <Route path="/dashboard" element={<ProtectedRoute><UserDashboard /></ProtectedRoute>} />
-              <Route path="/map" element={<ProtectedRoute><LiveMap /></ProtectedRoute>} />
-              <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
-              <Route path="/incidents" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
-              <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-              <Route path="/profile-settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
-              <Route path="/trust-ledger" element={<ProtectedRoute><TrustLedger /></ProtectedRoute>} />
-              <Route path="/review-queue" element={<ProtectedRoute><ReviewQueue /></ProtectedRoute>} />
-              
-              {/* Redirects and Fallbacks */}
-              <Route path="/reports" element={<Navigate to="/incidents" replace />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </Router>
+                {/* Protected Routes */}
+                <Route path="/dashboard" element={<ProtectedRoute><UserDashboard /></ProtectedRoute>} />
+                <Route path="/map" element={<ProtectedRoute><LiveMap /></ProtectedRoute>} />
+                <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
+                <Route path="/incidents" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+                <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+                <Route path="/profile-settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+                <Route path="/trust-ledger" element={<ProtectedRoute><TrustLedger /></ProtectedRoute>} />
+                <Route path="/review-queue" element={<ProtectedRoute><ReviewQueue /></ProtectedRoute>} />
+                <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+                
+                {/* Redirects and Fallbacks */}
+                <Route path="/reports" element={<Navigate to="/incidents" replace />} />
+                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              </Routes>
+            </Router>
+          </ToastProvider>
         </AuthProvider>
       </Providers>
     </AppErrorBoundary>

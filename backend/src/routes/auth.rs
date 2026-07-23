@@ -28,10 +28,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/register", post(register))
         .route("/login", post(login))
         .route("/google-login", post(google_login))
-    .route("/status", get(status))
-    .route("/profile", patch(update_profile))
-    .route("/approve/{id}", patch(approve_user))
-    .with_state(state)
+        .route("/status", get(status))
+        .route("/profile", patch(update_profile))
+        .route("/approve/{id}", patch(approve_user))
+        .route("/users", get(list_users))
+        .route("/users/pending", get(list_pending_users))
+        .with_state(state)
 }
 
 async fn health() -> Json<Value> {
@@ -350,4 +352,46 @@ async fn approve_user(
         "message": "User approved",
         "user": PublicUser::from(user)
     })))
+}
+
+// ---------------------------------------------------------------------
+// List all users (admin only)
+// ---------------------------------------------------------------------
+async fn list_users(
+    State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if current_user.role != "admin" {
+        return Err(err(StatusCode::FORBIDDEN, "Access denied. Admins only."));
+    }
+
+    let repo = UserRepository::new(state.db.clone());
+    let users = repo.list_all().await.map_err(|e| {
+        tracing::error!("list_users failed: {e:?}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+
+    let public: Vec<PublicUser> = users.into_iter().map(PublicUser::from).collect();
+    Ok(Json(json!({ "users": public })))
+}
+
+// ---------------------------------------------------------------------
+// List pending (unapproved) users (admin only)
+// ---------------------------------------------------------------------
+async fn list_pending_users(
+    State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if current_user.role != "admin" {
+        return Err(err(StatusCode::FORBIDDEN, "Access denied. Admins only."));
+    }
+
+    let repo = UserRepository::new(state.db.clone());
+    let users = repo.list_pending().await.map_err(|e| {
+        tracing::error!("list_pending_users failed: {e:?}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+
+    let public: Vec<PublicUser> = users.into_iter().map(PublicUser::from).collect();
+    Ok(Json(json!({ "users": public })))
 }

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import {
   RefreshCw,
   Layers,
@@ -167,12 +167,13 @@ const UserDashboard = () => {
     load();
   }, [load]);
 
+  const locationLabelsRef = useRef({});
   useEffect(() => {
     const pending = (data?.top_critical_incidents || []).filter(
       (incident) =>
         incident.latitude != null &&
         incident.longitude != null &&
-        !locationLabels[incident.incident_id]
+        !locationLabelsRef.current[incident.incident_id]
     );
 
     if (!pending.length) return;
@@ -186,14 +187,15 @@ const UserDashboard = () => {
           if (active) labels[incident.incident_id] = label;
         })
       );
-      if (active) {
-        setLocationLabels((prev) => ({ ...prev, ...labels }));
+      if (active && Object.keys(labels).length > 0) {
+        locationLabelsRef.current = { ...locationLabelsRef.current, ...labels };
+        setLocationLabels(locationLabelsRef.current);
       }
     };
 
     loadLabels();
     return () => { active = false; };
-  }, [data?.top_critical_incidents, locationLabels]);
+  }, [data?.top_critical_incidents]);
 
   const summary = data?.summary || {};
   const severityBreakdown = data?.severity_breakdown || {};
@@ -309,10 +311,16 @@ const UserDashboard = () => {
     return rows;
   }, [allIncidents, dayFormatter]);
 
-  const totalDailyIncidents = dailyIncidentData.reduce((sum, row) => sum + row.incidents, 0);
-  const peakDayRow = dailyIncidentData.reduce(
-    (peak, row) => (row.incidents > (peak?.incidents ?? -1) ? row : peak),
-    null
+  const totalDailyIncidents = useMemo(
+    () => dailyIncidentData.reduce((sum, row) => sum + row.incidents, 0),
+    [dailyIncidentData]
+  );
+  const peakDayRow = useMemo(
+    () => dailyIncidentData.reduce(
+      (peak, row) => (row.incidents > (peak?.incidents ?? -1) ? row : peak),
+      null
+    ),
+    [dailyIncidentData]
   );
 
   const incidentTrend = useMemo(() => {
@@ -392,10 +400,16 @@ const UserDashboard = () => {
     return rows;
   }, [allIncidents, recentAnalyses]);
 
-  const totalHourlyIncidents = hourlySeverityData.reduce((sum, r) => sum + r.total, 0);
-  const peakHourRow = hourlySeverityData.reduce(
-    (peak, row) => (row.total > (peak?.total ?? -1) ? row : peak),
-    null
+  const totalHourlyIncidents = useMemo(
+    () => hourlySeverityData.reduce((sum, r) => sum + r.total, 0),
+    [hourlySeverityData]
+  );
+  const peakHourRow = useMemo(
+    () => hourlySeverityData.reduce(
+      (peak, row) => (row.total > (peak?.total ?? -1) ? row : peak),
+      null
+    ),
+    [hourlySeverityData]
   );
 
   const priorityDistributionData = useMemo(() => {

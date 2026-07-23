@@ -47,9 +47,9 @@ const SignUpPage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const userTypes = [
-    { value: "admin", label: "Admin", icon: Shield, color: "admin", disabled: true },
-    { value: "ngo", label: "NGO", icon: Building, color: "ngo", disabled: true },
-    { value: "ddmo", label: "DDMO Official", icon: Briefcase, color: "ddmo", disabled: true },
+    { value: "admin", label: "Admin", icon: Shield, color: "admin", disabled: false },
+    { value: "ngo", label: "NGO", icon: Building, color: "ngo", disabled: false },
+    { value: "ddmo", label: "DDMO Official", icon: Briefcase, color: "ddmo", disabled: false },
     { value: "user", label: "General User", icon: User, color: "user", disabled: false },
   ];
 
@@ -108,32 +108,61 @@ const SignUpPage = () => {
       const lat = latStr ? parseFloat(latStr) : undefined;
       const lng = lngStr ? parseFloat(lngStr) : undefined;
 
-      const payload = {
-        role: userType,
-        username: userType === "user" ? formData.username : `${userType}_${Date.now()}`,
-        password: userType === "user" ? formData.password : undefined,
-        location: formData.location,
-        latitude: !isNaN(lat) ? lat : undefined,
-        longitude: !isNaN(lng) ? lng : undefined,
-        [`${userType}Id`]: formData.entityId || undefined,
-      };
+      const needsApproval = userType !== "user";
 
-      // Add NGO-specific fields
-      if (userType === 'ngo') {
-        payload.email = formData.email;
-        payload.phone = formData.phone;
+      let payload = {};
 
-        const [lat, lng] = formData.location.split(',').map(s => parseFloat(s.trim()));
-
-        payload.ngoDetails = {
-          organizationName: formData.organizationName,
-          registrationNumber: formData.entityId,
-          serviceRadius: parseInt(formData.serviceRadius) || 50000,
-          specializations: formData.specializations
-            ? formData.specializations.split(',').map(s => s.trim())
-            : [],
-          emergencyContact: formData.phone,
-          coordinates: { lat, lng }
+      if (userType === "user") {
+        payload = {
+          role: "user",
+          username: formData.username,
+          password: formData.password,
+          location: formData.location,
+          latitude: !isNaN(lat) ? lat : undefined,
+          longitude: !isNaN(lng) ? lng : undefined,
+        };
+      } else if (userType === "ngo") {
+        payload = {
+          role: "ngo",
+          username: `ngo_${Date.now()}`,
+          password: undefined,
+          email: formData.email,
+          phone: formData.phone,
+          location: formData.location,
+          latitude: !isNaN(lat) ? lat : undefined,
+          longitude: !isNaN(lng) ? lng : undefined,
+          officialId: formData.entityId,
+          ngoDetails: {
+            organizationName: formData.organizationName,
+            registrationNumber: formData.entityId,
+            serviceRadius: parseInt(formData.serviceRadius) || 50000,
+            specializations: formData.specializations
+              ? formData.specializations.split(',').map(s => s.trim())
+              : [],
+            emergencyContact: formData.phone,
+            coordinates: { lat: lat || 0, lng: lng || 0 }
+          }
+        };
+      } else if (userType === "ddmo") {
+        payload = {
+          role: "ddmo",
+          username: `ddmo_${Date.now()}`,
+          password: undefined,
+          email: formData.email.trim(),
+          phone: formData.phone || undefined,
+          officialId: formData.email.trim(),
+          location: formData.location,
+          latitude: !isNaN(lat) ? lat : undefined,
+          longitude: !isNaN(lng) ? lng : undefined,
+        };
+      } else if (userType === "admin") {
+        payload = {
+          role: "admin",
+          username: formData.username,
+          password: formData.password,
+          location: formData.location,
+          latitude: !isNaN(lat) ? lat : undefined,
+          longitude: !isNaN(lng) ? lng : undefined,
         };
       }
 
@@ -144,8 +173,9 @@ const SignUpPage = () => {
 
       setUserName(res.data.user?.name || formData.organizationName || formData.username || "New User");
 
-      if (userType === 'ngo') {
-        alert("NGO account created successfully! Your account is pending admin approval. You will receive an email notification once approved.");
+      if (needsApproval) {
+        const roleLabel = userType === "ngo" ? "NGO" : userType === "ddmo" ? "DDMO" : "Admin";
+        alert(`${roleLabel} account created successfully! Your account is pending admin approval. You will be able to log in once approved.`);
         navigate('/signin');
       } else {
         login(res.data.token);
@@ -280,111 +310,187 @@ const SignUpPage = () => {
     </>
   );
 
+  // ✅ DDMO-specific fields
+  const renderDDMOFields = () => (
+    <>
+      <div className="input__container">
+        <label htmlFor="email" className="input__label">Official Government Email</label>
+        <div className="input__wrapper">
+          <input
+            id="email"
+            type="email"
+            name="email"
+            value={formData.email || ''}
+            onChange={handleInputChange}
+            placeholder="you@department.gov.in"
+            className="input__field"
+            required
+          />
+          <Briefcase size={20} className="input__icon ddmo" />
+        </div>
+        <p className="form__helper-text">
+          Must be a valid government email address ending with .gov.in
+        </p>
+      </div>
+
+      <div className="input__container">
+        <label htmlFor="phone" className="input__label">Contact Number</label>
+        <div className="input__wrapper">
+          <input
+            id="phone"
+            type="tel"
+            name="phone"
+            value={formData.phone || ''}
+            onChange={handleInputChange}
+            placeholder="+91 XXXXXXXXXX"
+            className="input__field"
+          />
+        </div>
+      </div>
+    </>
+  );
+
+  // ✅ Admin-specific fields
+  const renderAdminFields = () => (
+    <>
+      <div className="input__container">
+        <label htmlFor="username" className="input__label">Admin Username</label>
+        <div className="input__wrapper">
+          <input
+            id="username"
+            type="text"
+            name="username"
+            value={formData.username}
+            onChange={handleInputChange}
+            placeholder="Choose an admin username"
+            className="input__field"
+          />
+          <Shield size={20} className="input__icon admin" />
+        </div>
+      </div>
+      <div className="input__container">
+        <label htmlFor="password" className="input__label">Password</label>
+        <div className="input__wrapper">
+          <input
+            id="password"
+            type={showPassword ? "text" : "password"}
+            name="password"
+            value={formData.password}
+            onChange={handleInputChange}
+            placeholder="Enter a strong password"
+            className="input__field"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            className="input__password-toggle"
+          >
+            {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+          </button>
+        </div>
+      </div>
+      <div className="input__container">
+        <label htmlFor="confirmPassword" className="input__label">Confirm Password</label>
+        <div className="input__wrapper">
+          <input
+            id="confirmPassword"
+            type={showConfirmPassword ? "text" : "password"}
+            name="confirmPassword"
+            value={formData.confirmPassword}
+            onChange={handleInputChange}
+            placeholder="Re-enter your password"
+            className="input__field"
+          />
+          <button
+            type="button"
+            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+            className="input__password-toggle"
+          >
+            {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+          </button>
+        </div>
+      </div>
+      {passwordError && <p className="form__error">{passwordError}</p>}
+      <div className="form__notice">
+        <Shield size={16} />
+        <span>Admin accounts require approval from an existing administrator.</span>
+      </div>
+    </>
+  );
+
   // ✅ Main render function for form fields
   const renderSpecificFields = () => {
-    const isUser = userType === "user";
-
-    if (userType === 'ngo') {
-      return renderNGOFields();
-    }
-
-    const entityIdPlaceholder = {
-      admin: "Admin ID",
-      ddmo: "DDMO Official ID",
-    }[userType];
-
-    return (
-      <div className="form__section">
-        {!isUser && userType !== 'ngo' && (
+    if (userType === 'ngo') return renderNGOFields();
+    if (userType === 'ddmo') return renderDDMOFields();
+    if (userType === 'admin') return renderAdminFields();
+    if (userType === 'user') {
+      return (
+        <>
           <div className="input__container">
-            <label htmlFor="entityId" className="input__label">
-              {entityIdPlaceholder}
-            </label>
+            <label htmlFor="username" className="input__label">Username</label>
             <div className="input__wrapper">
               <input
-                id="entityId"
+                id="username"
                 type="text"
-                name="entityId"
-                value={formData.entityId}
+                name="username"
+                value={formData.username}
                 onChange={handleInputChange}
-                placeholder={entityIdPlaceholder}
+                placeholder="Choose a username"
                 className="input__field"
               />
-              <span className={`input__icon ${userType}`}>
-                {userTypes.find((t) => t.value === userType)?.icon &&
-                  React.createElement(
-                    userTypes.find((t) => t.value === userType).icon,
-                    { size: 20 }
-                  )}
-              </span>
+              <User size={20} className="input__icon user" />
             </div>
           </div>
-        )}
-        {isUser && (
-          <>
-            <div className="input__container">
-              <label htmlFor="username" className="input__label">Username</label>
-              <div className="input__wrapper">
-                <input
-                  id="username"
-                  type="text"
-                  name="username"
-                  value={formData.username}
-                  onChange={handleInputChange}
-                  placeholder="Choose a username"
-                  className="input__field"
-                />
-                <User size={20} className="input__icon user" />
-              </div>
+          <div className="input__container">
+            <label htmlFor="password" className="input__label">Password</label>
+            <div className="input__wrapper">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                name="password"
+                value={formData.password}
+                onChange={handleInputChange}
+                placeholder="Enter a strong password"
+                className="input__field"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="input__password-toggle"
+              >
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
             </div>
-            <div className="input__container">
-              <label htmlFor="password" className="input__label">Password</label>
-              <div className="input__wrapper">
-                <input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  name="password"
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  placeholder="Enter a strong password"
-                  className="input__field"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="input__password-toggle"
-                >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
-              </div>
+          </div>
+          <div className="input__container">
+            <label htmlFor="confirmPassword" className="input__label">Confirm Password</label>
+            <div className="input__wrapper">
+              <input
+                id="confirmPassword"
+                type={showConfirmPassword ? "text" : "password"}
+                name="confirmPassword"
+                value={formData.confirmPassword}
+                onChange={handleInputChange}
+                placeholder="Re-enter your password"
+                className="input__field"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                className="input__password-toggle"
+              >
+                {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
             </div>
-            <div className="input__container">
-              <label htmlFor="confirmPassword" className="input__label">Confirm Password</label>
-              <div className="input__wrapper">
-                <input
-                  id="confirmPassword"
-                  type={showConfirmPassword ? "text" : "password"}
-                  name="confirmPassword"
-                  value={formData.confirmPassword}
-                  onChange={handleInputChange}
-                  placeholder="Re-enter your password"
-                  className="input__field"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="input__password-toggle"
-                >
-                  {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
-              </div>
-            </div>
-            {passwordError && <p className="form__error">{passwordError}</p>}
-          </>
-        )}
-      </div>
-    );
+          </div>
+          {passwordError && <p className="form__error">{passwordError}</p>}
+        </>
+      );
+    }
+    return null;
   };
+
+  const isGovEmail = (email) => /^[^\s@]+@[^\s@]+\.gov\.in$/.test(email);
 
   const isFormValid = () => {
     if (!userType || !formData.termsAccepted) return false;
@@ -395,18 +501,23 @@ const SignUpPage = () => {
         formData.organizationName.trim() !== "";
     }
 
-    if (userType !== "user" && formData.entityId.trim() === "") return false;
+    if (userType === 'ddmo') {
+      return formData.email.trim() !== "" && isGovEmail(formData.email.trim());
+    }
+
+    if (userType === 'admin') {
+      return formData.username.trim() !== "" &&
+        formData.password.length >= 8 &&
+        formData.password === formData.confirmPassword;
+    }
 
     if (userType === "user") {
-      if (
-        formData.username.trim() === "" ||
-        formData.password.length < 8 ||
-        formData.password !== formData.confirmPassword
-      ) {
-        return false;
-      }
+      return formData.username.trim() !== "" &&
+        formData.password.length >= 8 &&
+        formData.password === formData.confirmPassword;
     }
-    return true;
+
+    return false;
   };
 
   const handleAnimationComplete = () => {
@@ -450,9 +561,9 @@ const SignUpPage = () => {
             <h2 className="form__title">Create Your Account</h2>
             <p className="form__subtitle">
               {!userType && "Choose your role to get started."}
-              {userType === "admin" && "Fill in your Admin details below."}
-              {userType === "ngo" && "Provide your NGO credentials to continue."}
-              {userType === "ddmo" && "Enter your DDMO Official information."}
+              {userType === "admin" && "Create an admin account. Approval from an existing admin is required."}
+              {userType === "ngo" && "Register your NGO with your NITI Aayog DARPAN ID."}
+              {userType === "ddmo" && "Register with your official government email (.gov.in)."}
               {userType === "user" && "Set up your General User account."}
             </p>
           </div>

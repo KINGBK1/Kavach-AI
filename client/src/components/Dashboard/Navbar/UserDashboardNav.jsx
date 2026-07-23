@@ -13,7 +13,7 @@ import {
   ChevronDown,
   Activity,
   ShieldCheck,
-} from "lucide-react";
+  } from "lucide-react";
 import { useNavigate, Link, NavLink } from "react-router-dom";
 import { AuthContext } from "../../Auth/context/authContextValue";
 import "./UserDashboardNav.css";
@@ -94,6 +94,9 @@ const UserDashboardNavbar = ({ user }) => {
     { name: "Incidents", icon: Activity, href: "/incidents" },
     { name: "Ask Kavach", icon: MessageSquare, href: "/chat" },
     { name: "Trust Ledger", icon: ShieldCheck, href: "/trust-ledger" },
+    ...(safeUser?.role === "admin"
+      ? [{ name: "Admin Panel", icon: ShieldCheck, href: "/admin" }]
+      : []),
   ];
 
   return (

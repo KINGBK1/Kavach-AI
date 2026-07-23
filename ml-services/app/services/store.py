@@ -1,6 +1,12 @@
 # services/store.py
 import json
+import re
 from datetime import datetime
+from functools import lru_cache
+
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+
 from app.core.db import get_conn
 from app.models.incident import Incident
 from app.services.query_parser import COMMON_LOCATIONS
@@ -138,7 +144,24 @@ def get_stored_analyses(limit: int = 500) -> list[dict]:
     return results
 
 
-import re
+_geolocator = Nominatim(user_agent="kavach-ai/1.0")
+_reverse_geocode = RateLimiter(_geolocator.reverse, min_delay_seconds=1)
+
+
+@lru_cache(maxsize=2048)
+def _reverse_lookup(lat: float, lng: float) -> tuple[str | None, str | None]:
+    """Reverse geocode (lat, lng) → (city_or_region, country)."""
+    try:
+        location = _reverse_geocode((lat, lng), exactly_one=True, language="en")
+        if location:
+            raw = location.raw.get("address", {})
+            country = raw.get("country")
+            # Prefer city/town/village; fall back to state/region
+            place = raw.get("city") or raw.get("town") or raw.get("village") or raw.get("state") or raw.get("country")
+            return place, country
+    except Exception:
+        pass
+    return None, None
 
 
 def _text_mentions_location(text: str, location: str) -> bool:
@@ -150,6 +173,14 @@ def _text_mentions_location(text: str, location: str) -> bool:
 def _infer_location_and_country(incident: Incident) -> tuple[str | None, str | None]:
     if incident.location or incident.country:
         return incident.location, incident.country
+
+    # Try reverse geocoding from coordinates first
+    if incident.latitude is not None and incident.longitude is not None:
+        # Only try if it's not Null Island (0, 0)
+        if abs(incident.latitude) > 0.01 or abs(incident.longitude) > 0.01:
+            place, country = _reverse_lookup(incident.latitude, incident.longitude)
+            if place or country:
+                return place, country
 
     text = " ".join(
         part for part in [incident.title, incident.description] if part

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query, HTTPException
+from pydantic import BaseModel
 from app.models.request import IncidentRequest
 from app.models.incident import Incident
 from app.services.analyzer import analyze_incident, analyze_fetched_incident
@@ -8,6 +9,8 @@ from app.services.citizen_reports import (
     find_corroborating_incidents,
     save_citizen_report,
     get_citizen_reports,
+    promote_citizen_report,
+    reject_citizen_report,
 )
 from app.services.incident_agent import run_agent
 from app.core.config import MODEL_NAME
@@ -125,6 +128,29 @@ async def analyze_citizen_report(report: CitizenReportRequest):
 @router.get("/citizen-reports")
 def list_citizen_reports(status: str | None = Query(default=None), limit: int = Query(default=100, ge=1, le=500)):
     return get_citizen_reports(status=status, limit=limit)
+
+
+class ReviewAction(BaseModel):
+    report_id: str
+    reviewed_by: str
+
+
+@router.post("/citizen-reports/promote")
+def promote_report(action: ReviewAction):
+    try:
+        result = promote_citizen_report(action.report_id, action.reviewed_by)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/citizen-reports/reject")
+def reject_report(action: ReviewAction):
+    try:
+        result = reject_citizen_report(action.report_id, action.reviewed_by)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/all")

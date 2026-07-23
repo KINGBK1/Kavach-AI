@@ -1,5 +1,6 @@
 # app/services/chat.py
 import json
+import traceback
 from app.services.llm import ask_llm
 from app.services.query_parser import parse_query
 from app.services.retriever import retrieve_incidents
@@ -82,8 +83,15 @@ def _extract_json(raw: str) -> str:
 
 def answer_question(question: str) -> dict:
     parsed = parse_query(question)
-    incidents = retrieve_incidents(question, parsed=parsed)
-    context = _render_incidents(incidents)
+
+    user_prompt = ""
+    context = "No matching incidents were found."
+    try:
+        incidents = retrieve_incidents(question, parsed=parsed)
+        context = _render_incidents(incidents)
+    except Exception as e:
+        print(f"[CHAT] retrieve_incidents failed: {e}", flush=True)
+        incidents = []
 
     user_prompt = f"""
 Parsed Filters (already applied to retrieve the incidents below):
@@ -111,11 +119,6 @@ User Question:
             try:
                 data = json.loads(cleaned)
             except json.JSONDecodeError:
-                # Never hand the user raw model output here — if both parse
-                # attempts failed, `raw` is unstructured and, worse, may be
-                # a wall of scraped source text (headlines, RSS fragments)
-                # that leaked in through a bad retrieval match rather than
-                # anything Gemini actually said. Fail safely instead.
                 print(f"[CHAT] JSON parse failed twice, raw (truncated): {raw[:200]}", flush=True)
                 return {
                     "answer": (
@@ -137,9 +140,6 @@ User Question:
                 return []
             resolved = []
             for entry in raw_ids:
-                # Expect plain incident_id strings per the prompt schema, but
-                # tolerate a model that still returns {"incident_id": "..."}
-                # style objects rather than dropping the row entirely.
                 entry_id = entry if isinstance(entry, str) else (
                     entry.get("incident_id") if isinstance(entry, dict) else None
                 )
@@ -157,12 +157,35 @@ User Question:
         }
 
     except Exception as e:
-        print(f"[CHAT] answer_question failed: {e}", flush=True)
+        tb = traceback.format_exc()
+        print(f"[CHAT] answer_question failed: {e}\n{tb}", flush=True)
+        # Fallback: build a simple response from retrieved incidents without LLM
+        if incidents:
+            cat = parsed.get("category") or "incidents"
+            loc = parsed.get("location") or "the database"
+            count = len(incidents)
+            top = incidents[:3]
+            lines = [f"I found {count} {cat} matching **{loc}**.", "", "Top incidents:"]
+            for inc in top:
+                sev = inc.get("severity") or "Unknown"
+                title = inc.get("title") or inc.get("incident_type") or "Unknown"
+                loc_name = inc.get("location") or inc.get("country") or ""
+                lines.append(f"- **{title}** ({sev}){f' — {loc_name}' if loc_name else ''}")
+            if count > 3:
+                lines.append(f"- ... and {count - 3} more")
+            return {
+                "answer": "\n".join(lines),
+                "relevant_incidents": incidents[:5],
+                "confidence": 0.3,
+                "model": "fallback",
+                "processing_time_ms": 0,
+                "parsed_query": parsed,
+            }
         return {
-            "answer": "I encountered an error processing your question. Please try again.",
+            "answer": "I couldn't find any relevant incidents matching your question. Try asking about a different region or category (e.g., \"floods in Assam\" or \"current critical incidents\").",
             "relevant_incidents": [],
             "confidence": 0.0,
-            "model": "unknown",
+            "model": "fallback",
             "processing_time_ms": 0,
             "parsed_query": parsed,
         }

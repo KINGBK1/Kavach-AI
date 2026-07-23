@@ -26,6 +26,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/analyze", get(analyze_incidents))
         .route("/report", post(submit_report))
         .route("/citizen-reports", get(list_citizen_reports))
+        .route("/citizen-reports/promote", post(promote_report))
+        .route("/citizen-reports/reject", post(reject_report))
         .with_state(state)
 }
 
@@ -234,5 +236,53 @@ async fn submit_report(
     }
 
     println!("[REPORT] Returning analysis result to frontend");
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+pub struct ReviewAction {
+    pub report_id: String,
+    pub reviewed_by: String,
+}
+
+/// Promote a citizen report to the trusted incidents table.
+async fn promote_report(
+    State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
+    Json(action): Json<ReviewAction>,
+) -> Result<Json<Value>, StatusCode> {
+    let client = AiClient::new(state.ai_service_url.clone());
+    let payload = serde_json::json!({
+        "report_id": action.report_id,
+        "reviewed_by": current_user.id.to_string(),
+    });
+    let result = client
+        .post_json("/analyze/citizen-reports/promote", payload)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to promote report: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(result))
+}
+
+/// Reject a citizen report during human review.
+async fn reject_report(
+    State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
+    Json(action): Json<ReviewAction>,
+) -> Result<Json<Value>, StatusCode> {
+    let client = AiClient::new(state.ai_service_url.clone());
+    let payload = serde_json::json!({
+        "report_id": action.report_id,
+        "reviewed_by": current_user.id.to_string(),
+    });
+    let result = client
+        .post_json("/analyze/citizen-reports/reject", payload)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to reject report: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     Ok(Json(result))
 }

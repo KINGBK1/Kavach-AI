@@ -153,30 +153,81 @@ def save_citizen_report(
     return str(report_id)
 
 
+def promote_citizen_report(report_id: str, reviewed_by: str) -> dict:
+    """Promote a citizen report to the trusted incidents table.
+    Returns {incident_id, status} or raises ValueError if not found."""
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, description, latitude, longitude, category, analysis, status FROM citizen_reports WHERE id = %s",
+            (report_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Report {report_id} not found")
+        if row["status"] == "promoted":
+            raise ValueError(f"Report {report_id} already promoted")
+
+        analysis = row["analysis"]
+        incident_id = f"citizen-promoted-{report_id}"
+        cursor.execute(
+            """
+            INSERT INTO incidents
+                (id, source, title, description, category, latitude, longitude, severity, timestamp, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'active')
+            ON CONFLICT (id) DO NOTHING
+            """,
+            (
+                incident_id,
+                "citizen-report",
+                (row["description"] or "")[:80],
+                row["description"],
+                row["category"],
+                row["latitude"],
+                row["longitude"],
+                analysis.get("severity") if isinstance(analysis, dict) else None,
+            ),
+        )
+
+        cursor.execute(
+            "UPDATE citizen_reports SET status = 'promoted', promoted_incident_id = %s, reviewed_by = %s, reviewed_at = NOW() WHERE id = %s",
+            (incident_id, reviewed_by, report_id),
+        )
+
+    return {"incident_id": incident_id, "status": "promoted"}
+
+
+def reject_citizen_report(report_id: str, reviewed_by: str) -> dict:
+    """Mark a citizen report as rejected by a human reviewer."""
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE citizen_reports SET status = 'rejected', reviewed_by = %s, reviewed_at = NOW() WHERE id = %s AND status != 'promoted'",
+            (reviewed_by, report_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Report {report_id} not found or already promoted")
+    return {"status": "rejected", "id": report_id}
+
+
 def get_citizen_reports(status: str | None = None, limit: int = 100) -> list[dict]:
     with get_conn() as conn:
         cursor = conn.cursor()
+        base_sql = """
+            SELECT cr.id, cr.description, cr.latitude, cr.longitude,
+                   cr.category, cr.analysis, cr.reported_by, cr.status,
+                   cr.created_at, u.username, u.email
+            FROM citizen_reports cr
+            LEFT JOIN users u ON u.id = cr.reported_by::uuid
+        """
         if status:
             cursor.execute(
-                """
-                SELECT id, description, latitude, longitude, category, analysis,
-                       reported_by, status, created_at
-                FROM citizen_reports
-                WHERE status = %s
-                ORDER BY created_at DESC
-                LIMIT %s
-                """,
+                base_sql + " WHERE cr.status = %s ORDER BY cr.created_at DESC LIMIT %s",
                 (status, limit),
             )
         else:
             cursor.execute(
-                """
-                SELECT id, description, latitude, longitude, category, analysis,
-                       reported_by, status, created_at
-                FROM citizen_reports
-                ORDER BY created_at DESC
-                LIMIT %s
-                """,
+                base_sql + " ORDER BY cr.created_at DESC LIMIT %s",
                 (limit,),
             )
         rows = cursor.fetchall()
@@ -190,6 +241,8 @@ def get_citizen_reports(status: str | None = None, limit: int = 100) -> list[dic
             "category": row["category"],
             "analysis": row["analysis"],
             "reported_by": str(row["reported_by"]) if row["reported_by"] else None,
+            "reporter_username": row["username"],
+            "reporter_email": row["email"],
             "status": row["status"],
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         }

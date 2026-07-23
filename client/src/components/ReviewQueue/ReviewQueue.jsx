@@ -12,9 +12,13 @@ import {
   Eye,
   Sparkles,
   Hourglass,
+  CheckCircle,
+  XCircle,
+  Loader2,
 } from "lucide-react";
 import PageShell from "../Layout/PageShell";
-import { getCitizenReports } from "../../api/varunaApi";
+import { getCitizenReports, promoteReport, rejectReport } from "../../api/varunaApi";
+import { useToast } from "../Toast/ToastContext";
 import { SeverityBadge, PriorityScore, ConfidenceBadge } from "../common/Severity";
 import "../Reports/Reports.css";
 import "../TrustLedger/TrustLedger.css";
@@ -24,6 +28,8 @@ const ReviewQueue = () => {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
+  const addToast = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -34,12 +40,39 @@ const ReviewQueue = () => {
     } catch (err) {
       console.error("Failed to load review queue:", err);
       setError("Couldn't load the review queue. Check the backend is reachable.");
+      addToast("Failed to load review queue", "error");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [addToast]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handlePromote = async (reportId) => {
+    setActionLoading(reportId);
+    try {
+      await promoteReport(reportId);
+      addToast("Report promoted to trusted incidents", "success");
+      setReports((prev) => prev.filter((r) => r.id !== reportId));
+    } catch (err) {
+      addToast("Failed to promote report: " + (err.response?.data?.detail || err.message), "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReject = async (reportId) => {
+    setActionLoading(reportId);
+    try {
+      await rejectReport(reportId);
+      addToast("Report rejected", "info");
+      setReports((prev) => prev.filter((r) => r.id !== reportId));
+    } catch (err) {
+      addToast("Failed to reject report: " + (err.response?.data?.detail || err.message), "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const sorted = [...reports].sort((a, b) => {
     const aConf = a.analysis?.confidence ?? 0;
@@ -54,22 +87,18 @@ const ReviewQueue = () => {
           <div>
             <h1>Review Queue</h1>
             <p>
-              Citizen reports that the verification agent couldn't confidently confirm or reject.
-              Medium-confidence reports are flagged "likely real" and should be reviewed first.
-              Use this queue to triage and promote genuine reports into the trusted incidents table.
+              Citizen reports that need human review. Medium-confidence reports
+              are flagged "likely real" — review those first. Promote genuine
+              reports into the trusted incidents table, or reject false ones.
             </p>
           </div>
-          <button
-            className="v-trust-ledger-refresh"
-            onClick={load}
-            disabled={loading}
-          >
+          <button className="v-trust-ledger-refresh" onClick={load} disabled={loading}>
             <RefreshCw size={14} className={loading ? "v-spin" : ""} />
             Refresh
           </button>
         </div>
 
-        {loading && <div className="v-trust-ledger-state">Loading…</div>}
+        {loading && <div className="v-trust-ledger-state"><Loader2 size={24} className="v-spin" /></div>}
         {error && <div className="v-trust-ledger-state v-trust-ledger-error">{error}</div>}
         {!loading && !error && reports.length === 0 && (
           <div className="v-trust-ledger-state">
@@ -86,7 +115,7 @@ const ReviewQueue = () => {
           </div>
           <div className="v-review-summary-card priority">
             <Sparkles size={16} />
-            <span>Likely real (≥40% confidence)</span>
+            <span>Likely real (&ge;40% confidence)</span>
             <strong>{reports.filter((r) => (r.analysis?.confidence ?? 0) >= 0.4).length}</strong>
           </div>
         </div>
@@ -99,6 +128,7 @@ const ReviewQueue = () => {
             const isLikelyReal = confidence >= 0.4;
             const sourcesChecked = verification.sources_checked || [];
             const webSummary = verification.web_search_summary || "";
+            const isLoading = actionLoading === report.id;
 
             return (
               <div
@@ -176,6 +206,25 @@ const ReviewQueue = () => {
                     <p>{webSummary}</p>
                   </div>
                 )}
+
+                <div className="v-review-actions">
+                  <button
+                    className="v-btn v-review-promote"
+                    onClick={() => handlePromote(report.id)}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? <Loader2 size={14} className="v-spin" /> : <CheckCircle size={14} />}
+                    Promote to incidents
+                  </button>
+                  <button
+                    className="v-btn v-review-reject"
+                    onClick={() => handleReject(report.id)}
+                    disabled={isLoading}
+                  >
+                    <XCircle size={14} />
+                    Reject
+                  </button>
+                </div>
               </div>
             );
           })}

@@ -2,6 +2,7 @@ import React, { useContext } from "react";
 import UserDashboardNavbar from "../Dashboard/Navbar/UserDashboardNav";
 import Footer from "../Footer/Footer";
 import LocationPermissionBanner from "./LocationPermissionBanner";
+import PageTransition from "../common/Animations/PageTransition";
 import { AuthContext } from "../Auth/context/authContextValue";
 import "./PageShell.css";
 
@@ -12,7 +13,9 @@ const PageShell = ({ children, noFooter = false }) => {
     <div className="v-page-shell">
       <UserDashboardNavbar user={user} />
       <LocationPermissionBanner />
-      <main className="v-page-content">{children}</main>
+      <main className="v-page-content">
+        <PageTransition>{children}</PageTransition>
+      </main>
       {!noFooter && <Footer />}
     </div>
   );

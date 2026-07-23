@@ -120,3 +120,30 @@
   height: 260px;
   width: 100%;
 }
+
+@media (max-width: 640px) {
+  .v-profile-card {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+  .v-profile-avatar {
+    margin: 0 auto;
+  }
+  .v-profile-location-section,
+  .v-profile-prefs,
+  .v-profile-card {
+    max-width: 100%;
+  }
+  .v-profile-map-container {
+    height: 200px;
+  }
+  .v-pref-toggle {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .v-pref-toggle .v-toggle-switch {
+    align-self: flex-end;
+  }
+}

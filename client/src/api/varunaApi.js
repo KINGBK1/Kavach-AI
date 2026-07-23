@@ -250,4 +250,40 @@ export const updateProfile = async ({ latitude, longitude, preferences }) => {
   }
 };
 
+/** GET /auth/users — list all users (admin only) */
+export const getUsers = async () => {
+  const { data } = await client.get("/auth/users");
+  return data?.users ?? [];
+};
+
+/** GET /auth/users/pending — list unapproved users (admin only) */
+export const getPendingUsers = async () => {
+  const { data } = await client.get("/auth/users/pending");
+  return data?.users ?? [];
+};
+
+/** PATCH /auth/approve/{id} — approve a user account (admin only) */
+export const approveUser = async (userId) => {
+  const { data } = await client.patch(`/auth/approve/${userId}`);
+  return data;
+};
+
+/** POST /incidents/citizen-reports/promote — promote a citizen report (admin) */
+export const promoteReport = async (reportId) => {
+  const { data } = await client.post("/incidents/citizen-reports/promote", {
+    report_id: reportId,
+    reviewed_by: "admin",
+  });
+  return data;
+};
+
+/** POST /incidents/citizen-reports/reject — reject a citizen report (admin) */
+export const rejectReport = async (reportId) => {
+  const { data } = await client.post("/incidents/citizen-reports/reject", {
+    report_id: reportId,
+    reviewed_by: "admin",
+  });
+  return data;
+};
+
 export default client;
