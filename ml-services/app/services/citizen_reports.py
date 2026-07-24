@@ -15,9 +15,14 @@
 # a human (admin/ngo/ddmo) to look at — it never auto-promotes itself.
 
 import json
+import os
 from datetime import datetime, timezone
 
+import requests
+
 from app.core.db import get_conn
+
+MAIL_SERVICE_URL = os.getenv("MAIL_SERVICE_URL", "http://localhost:8001")
 
 CORROBORATION_RADIUS_DEGREES = 0.25  # ~25km at the equator, good enough for a hackathon-scale check
 CORROBORATION_WINDOW_HOURS = 24
@@ -153,6 +158,37 @@ def save_citizen_report(
     return str(report_id)
 
 
+def _trigger_promote_alert(
+    incident_id: str,
+    description: str,
+    latitude: float,
+    longitude: float,
+    category: str,
+    analysis: dict,
+) -> None:
+    payload = {
+        "incident_id": incident_id,
+        "title": (description or "")[:80],
+        "description": description or "",
+        "summary": analysis.get("summary", "") if isinstance(analysis, dict) else "",
+        "recommended_actions": analysis.get("recommended_actions", []) if isinstance(analysis, dict) else [],
+        "latitude": latitude,
+        "longitude": longitude,
+        "category": category or "",
+        "incident_type": analysis.get("incident_type", "") if isinstance(analysis, dict) else "",
+        "severity": analysis.get("severity", "") if isinstance(analysis, dict) else "",
+        "source": "citizen-report",
+    }
+    try:
+        resp = requests.post(f"{MAIL_SERVICE_URL}/alerts", json=payload, timeout=30)
+        if resp.ok:
+            print(f"[PROMOTE] Alert sent for {incident_id}: sent={resp.json().get('sent', '?')}", flush=True)
+        else:
+            print(f"[PROMOTE] Mail service returned {resp.status_code} for {incident_id}: {resp.text}", flush=True)
+    except Exception as e:
+        print(f"[PROMOTE] Failed to send alert for {incident_id}: {e}", flush=True)
+
+
 def promote_citizen_report(report_id: str, reviewed_by: str) -> dict:
     """Promote a citizen report to the trusted incidents table.
     Returns {incident_id, status} or raises ValueError if not found."""
@@ -193,6 +229,15 @@ def promote_citizen_report(report_id: str, reviewed_by: str) -> dict:
             "UPDATE citizen_reports SET status = 'promoted', promoted_incident_id = %s, reviewed_by = %s, reviewed_at = NOW() WHERE id = %s",
             (incident_id, reviewed_by, report_id),
         )
+
+    _trigger_promote_alert(
+        incident_id=incident_id,
+        description=row["description"],
+        latitude=row["latitude"],
+        longitude=row["longitude"],
+        category=row["category"],
+        analysis=analysis,
+    )
 
     return {"incident_id": incident_id, "status": "promoted"}
 

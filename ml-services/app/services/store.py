@@ -144,8 +144,8 @@ def get_stored_analyses(limit: int = 500) -> list[dict]:
     return results
 
 
-_geolocator = Nominatim(user_agent="kavach-ai/1.0")
-_reverse_geocode = RateLimiter(_geolocator.reverse, min_delay_seconds=1)
+_geolocator = Nominatim(user_agent="kavach-ai/1.0", timeout=10)
+_reverse_geocode = RateLimiter(_geolocator.reverse, min_delay_seconds=2, max_retries=0)
 
 
 @lru_cache(maxsize=2048)
