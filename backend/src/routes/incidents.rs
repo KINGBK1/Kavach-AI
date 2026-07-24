@@ -189,7 +189,7 @@ async fn submit_report(
         };
 
         let alert_payload = serde_json::json!({
-            "report_id": report_id,
+            "incident_id": report_id,
             "title": title,
             "description": report.description,
             "summary": summary,
