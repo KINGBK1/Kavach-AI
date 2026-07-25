@@ -42,7 +42,9 @@ def find_nearby_users(lat: float, lng: float, radius_km: float) -> list[dict]:
     nearby = []
     for row in rows:
         prefs = row["preferences"]
-        if isinstance(prefs, str):
+        if prefs is None:
+            prefs = {}
+        elif isinstance(prefs, str):
             try:
                 prefs = json.loads(prefs)
             except (json.JSONDecodeError, TypeError):

@@ -107,10 +107,18 @@ ABSOLUTE RULES — you MUST obey:
 - The JSON MUST be valid and complete
 - If you output anything other than pure JSON, the system will break
 
+EVIDENCE QUALITY — articles must describe the SAME incident:
+- A relevant article MUST describe the SAME specific event at the SAME location within the last few days.
+- Articles about the general region ("Kolkata is in a seismic zone", "India experiences earthquakes") are NOT evidence.
+- Articles about a different event in the same area (e.g., a flood in a city where someone reported an earthquake) are NOT evidence.
+- Articles about the SAME weather event on a different date are NOT evidence.
+- If an article mentions a different magnitude, different time, or different specific location than the report, it is NOT a match.
+
 EVIDENCE WEIGHTING FOR CONFIDENCE:
-- Web search with 2+ recent relevant articles: strong evidence (+0.3 to confidence)
-- Web search with 1 relevant article: moderate evidence (+0.15)
-- DB corroboration (trusted source nearby): strong evidence (+0.25 each)
+- Web search with 2+ articles about THE SAME incident: strong evidence (+0.3)
+- Web search with 1 article about THE SAME incident: moderate evidence (+0.15)
+- Web search with articles only about the general region/topic but NOT the same incident: NO confidence boost (0)
+- DB corroboration (trusted source nearby, same timeframe): strong evidence (+0.25 each)
 - Weather context that matches the incident type (e.g. heavy rain for flood, high wind for cyclone): supporting evidence (+0.1)
 - Weather context that contradicts the incident type (e.g. clear skies for flood): reduces confidence (-0.15)
 - Multiple sources agreeing: confidence multiplier
@@ -123,10 +131,12 @@ CONFIDENCE CALIBRATION — be honest, not inflated:
 - 0.0-0.19: No evidence found; both web and DB returned nothing
 
 DECISION LOGIC:
-- status = 'verified' if web search finds real news articles OR DB has corroborating incidents nearby
-- status = 'rejected' if BOTH web search AND DB return nothing
-- The confidence score should reflect HOW MUCH evidence was found, not just a binary yes/no
-- Set verification.is_verified based on the same logic
+- CRITICAL: An article is only "evidence" if it describes the SAME incident (same location, same time window, same type, same scale).
+- General articles about a region's history with a disaster type are NOT evidence.
+- status = 'verified' ONLY if at least one article describes the SAME specific incident OR DB has a corroborating record nearby.
+- status = 'rejected' if NO article describes the same incident AND DB has no corroborating record.
+- The confidence score should reflect HOW MUCH matching evidence was found, not just a binary yes/no.
+- Set verification.is_verified based on the same logic.
 
 SEVERITY CALIBRATION:
 - Incorporate weather data: flood + heavy rain = Critical; fire + high wind + low humidity = Critical

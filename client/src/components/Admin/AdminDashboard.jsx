@@ -107,9 +107,20 @@ const AdminDashboard = () => {
   const handlePromoteReport = async (reportId) => {
     setReportActionLoading(reportId);
     try {
-      await promoteReport(reportId);
-      addToast("Report promoted to trusted incidents", "success");
-      setReports((prev) => prev.filter((r) => r.id !== reportId));
+      const data = await promoteReport(reportId);
+      const alertInfo = data.alert;
+      if (alertInfo) {
+        if (alertInfo.error) {
+          addToast(`Promoted, but alert failed: ${alertInfo.error}`, "warning");
+        } else if (alertInfo.sent > 0) {
+          addToast(`Promoted — ${alertInfo.sent} alert${alertInfo.sent > 1 ? 's' : ''} sent (${alertInfo.total_nearby} nearby, ${alertInfo.radius_used}km radius)`, "success");
+        } else {
+          addToast(`Promoted — no nearby users found for alerts`, "info");
+        }
+      } else {
+        addToast("Report promoted to trusted incidents", "success");
+      }
+      setReports((prev) => prev.map((r) => r.id === reportId ? { ...r, status: "promoted" } : r));
     } catch (err) {
       addToast("Failed to promote report: " + (err.response?.data?.detail || err.message), "error");
     } finally {
@@ -410,22 +421,31 @@ const AdminDashboard = () => {
                     )}
 
                     <div className="v-review-actions">
-                      <button
-                        className="v-btn v-review-promote"
-                        onClick={() => handlePromoteReport(report.id)}
-                        disabled={isLoading}
-                      >
-                        {isLoading ? <Loader2 size={14} className="v-spin" /> : <CheckCircle size={14} />}
-                        Promote to incidents
-                      </button>
-                      <button
-                        className="v-btn v-review-reject"
-                        onClick={() => handleKeepRejected(report.id)}
-                        disabled={isLoading}
-                      >
-                        <XCircle size={14} />
-                        Keep rejected
-                      </button>
+                      {report.status === "promoted" ? (
+                        <span className="v-review-promoted-badge">
+                          <CheckCircle size={14} />
+                          Promoted to incidents
+                        </span>
+                      ) : (
+                        <>
+                          <button
+                            className="v-btn v-review-promote"
+                            onClick={() => handlePromoteReport(report.id)}
+                            disabled={isLoading}
+                          >
+                            {isLoading ? <Loader2 size={14} className="v-spin" /> : <CheckCircle size={14} />}
+                            Promote to incidents
+                          </button>
+                          <button
+                            className="v-btn v-review-reject"
+                            onClick={() => handleKeepRejected(report.id)}
+                            disabled={isLoading}
+                          >
+                            <XCircle size={14} />
+                            Keep rejected
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );

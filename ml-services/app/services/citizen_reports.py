@@ -165,7 +165,7 @@ def _trigger_promote_alert(
     longitude: float,
     category: str,
     analysis: dict,
-) -> None:
+) -> dict:
     payload = {
         "incident_id": incident_id,
         "title": (description or "")[:80],
@@ -182,11 +182,33 @@ def _trigger_promote_alert(
     try:
         resp = requests.post(f"{MAIL_SERVICE_URL}/alerts", json=payload, timeout=30)
         if resp.ok:
-            print(f"[PROMOTE] Alert sent for {incident_id}: sent={resp.json().get('sent', '?')}", flush=True)
+            body = resp.json()
+            print(f"[PROMOTE] Alert sent for {incident_id}: sent={body.get('sent', '?')}", flush=True)
+            return {
+                "sent": body.get("sent", 0),
+                "failed": body.get("failed", 0),
+                "total_nearby": body.get("total_nearby", 0),
+                "radius_used": body.get("radius_used", 0),
+            }
         else:
-            print(f"[PROMOTE] Mail service returned {resp.status_code} for {incident_id}: {resp.text}", flush=True)
+            body = resp.text
+            print(f"[PROMOTE] Mail service returned {resp.status_code} for {incident_id}: {body}", flush=True)
+            return {
+                "sent": 0,
+                "failed": 0,
+                "total_nearby": 0,
+                "radius_used": 0,
+                "error": f"Mail service returned {resp.status_code}: {body}",
+            }
     except Exception as e:
         print(f"[PROMOTE] Failed to send alert for {incident_id}: {e}", flush=True)
+        return {
+            "sent": 0,
+            "failed": 0,
+            "total_nearby": 0,
+            "radius_used": 0,
+            "error": str(e),
+        }
 
 
 def promote_citizen_report(report_id: str, reviewed_by: str) -> dict:
@@ -229,8 +251,10 @@ def promote_citizen_report(report_id: str, reviewed_by: str) -> dict:
             "UPDATE citizen_reports SET status = 'promoted', promoted_incident_id = %s, reviewed_by = %s, reviewed_at = NOW() WHERE id = %s",
             (incident_id, reviewed_by, report_id),
         )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Report {report_id} not found or already promoted")
 
-    _trigger_promote_alert(
+    alert_info = _trigger_promote_alert(
         incident_id=incident_id,
         description=row["description"],
         latitude=row["latitude"],
@@ -239,7 +263,7 @@ def promote_citizen_report(report_id: str, reviewed_by: str) -> dict:
         analysis=analysis,
     )
 
-    return {"incident_id": incident_id, "status": "promoted"}
+    return {"incident_id": incident_id, "status": "promoted", "alert": alert_info}
 
 
 def reject_citizen_report(report_id: str, reviewed_by: str) -> dict:
