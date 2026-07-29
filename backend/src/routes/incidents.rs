@@ -214,9 +214,16 @@ async fn submit_report(
         .unwrap_or("unverified")
         .to_string();
 
-    // Old endpoint returned "corroborated", the ADK agent returns "verified".
-    // Both mean the same thing: this report has been cross-checked and confirmed.
-    let corroborated = status == "corroborated" || status == "verified";
+    // The fallback (non-ADK) path now always returns status="unverified" and
+    // signals corroboration via a separate boolean field — "corroborated"
+    // is a review-workflow status the DB no longer accepts (see
+    // citizen_reports_status_check), so it must never be matched as a
+    // status string. The ADK agent path still uses status="verified".
+    let corroborated = result
+        .get("corroborated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || status == "verified";
 
     let analysis = result.get("analysis").and_then(|a| a.as_object());
     let severity = analysis.and_then(|a| a.get("severity").and_then(|s| s.as_str())).unwrap_or("UNKNOWN");

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Search,
   Zap,
@@ -101,11 +102,24 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
     }
   };
 
-  const isVerified = result?.analysis?.verification?.is_verified ?? (result?.status === "corroborated" || result?.status === "verified");
+  // The fallback (non-ADK) analysis path always returns status="unverified"
+  // now — the DB rejects "corroborated" as a status value (see
+  // citizen_reports_status_check) — and signals corroboration via a
+  // separate `corroborated` boolean instead. The ADK agent path still
+  // returns status="verified" directly.
+  const isVerified = result?.analysis?.verification?.is_verified ?? (result?.corroborated === true || result?.status === "verified");
   const sourcesChecked = result?.analysis?.verification?.sources_checked || [];
   const webSummary = result?.analysis?.verification?.web_search_summary || "";
 
-  return (
+  // Rendered via a portal straight to document.body: PageShell wraps every
+  // page in PageTransition, which applies `transform: translateY(...)` for
+  // the enter animation. Any CSS transform on an ancestor creates a new
+  // containing block for descendants — so this modal's `position: fixed`
+  // backdrop was being fixed relative to that transformed div instead of
+  // the real viewport, leaving a gap above it and pushing the modal down.
+  // Portaling out of that subtree keeps it truly viewport-fixed regardless
+  // of what transitions/animations wrap the page.
+  return createPortal(
     <div className="v-modal-backdrop" onClick={onClose}>
       <div className="v-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="v-modal-header">
@@ -278,7 +292,8 @@ const ManualAnalyzeModal = ({ onClose, onResult }) => {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

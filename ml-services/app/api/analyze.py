@@ -96,7 +96,14 @@ async def analyze_citizen_report(report: CitizenReportRequest):
         fallback = analyze_fetched_incident(throwaway_incident)
 
         corroborating = find_corroborating_incidents(report.latitude, report.longitude, category)
-        fallback_status = "corroborated" if corroborating else "unverified"
+        # DB status must be one of the review-workflow states enforced by
+        # citizen_reports_status_check ('unverified' | 'verified' | 'rejected'
+        # | 'promoted'). Corroboration is supporting evidence for a human
+        # reviewer, not a workflow state on its own — a report always lands
+        # as 'unverified' here regardless of whether corroborating incidents
+        # were found nearby. (Using "corroborated" previously violated the
+        # CHECK constraint and crashed the insert with a 500.)
+        fallback_status = "unverified"
 
         report_id = save_citizen_report(
             description=report.description,
@@ -111,6 +118,7 @@ async def analyze_citizen_report(report: CitizenReportRequest):
         return {
             "report_id": report_id,
             "status": fallback_status,
+            "corroborated": bool(corroborating),
             "corroborating_incidents": corroborating,
             "analysis": fallback["analysis"],
             "metadata": fallback["metadata"],
