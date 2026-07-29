@@ -10,7 +10,7 @@ from app.connectors.firms import FIRMSConnector
 from app.connectors.google_news import GoogleNewsConnector
 
 from app.services.aggregator import IncidentAggregator
-from app.services.store import get_stored_incidents
+from app.services.store import get_stored_incidents, get_incidents_count, get_hourly_severity, get_daily_incidents
 
 router = APIRouter(
     prefix="/sources",
@@ -101,11 +101,29 @@ def google_news(query: str | None = None, limit: int = Query(default=20, ge=1, l
     return incidents[:limit]
 
 @router.get("/all")
-def all_sources(limit: int = Query(default=500, ge=1, le=50000)):
+def all_sources(limit: int = Query(default=500, ge=1, le=50000), offset: int = Query(default=0, ge=0)):
     """
     Reads incidents from Postgres instead of live-hitting all 7 connectors
     on every request. The background scheduler (services/scheduler.py) is
     the only thing that calls IncidentAggregator().fetch_all() now — this
     endpoint just serves what's already stored.
     """
-    return get_stored_incidents(limit=limit)
+    return get_stored_incidents(limit=limit, offset=offset)
+
+
+@router.get("/count")
+def incidents_count():
+    """Real COUNT(*) across the full incidents table — not capped by any limit."""
+    return {"count": get_incidents_count()}
+
+
+@router.get("/hourly-severity")
+def hourly_severity():
+    """Incidents aggregated by hour-of-day and severity over the full table."""
+    return get_hourly_severity()
+
+
+@router.get("/daily")
+def daily_incidents(days: int = Query(default=30, ge=1, le=365)):
+    """Incidents aggregated by calendar day over the full table."""
+    return get_daily_incidents(days=days)

@@ -17,11 +17,11 @@ impl AiClient {
         }
     }
 
-    pub async fn get_all_incidents(&self, limit: u32) -> Result<Vec<Value>> {
+    pub async fn get_all_incidents(&self, limit: u32, offset: u32) -> Result<Vec<Value>> {
         let url = format!("{}/sources/all", self.base_url);
         let response = self.client
             .get(&url)
-            .query(&[("limit", limit)])
+            .query(&[("limit", limit), ("offset", offset)])
             .send()
             .await?;
 
@@ -210,6 +210,51 @@ impl AiClient {
         serde_json::from_str::<Value>(&text).map_err(|err| {
             anyhow!("POST {} decode failed: {} - body: {}", path, err, text)
         })
+    }
+
+    pub async fn get_incidents_count(&self) -> Result<Value> {
+        let url = format!("{}/sources/count", self.base_url);
+        let response = self.client
+            .get(&url)
+            .send()
+            .await?
+            .json::<Value>()
+            .await?;
+        Ok(response)
+    }
+
+    pub async fn get_analyses_count(&self) -> Result<Value> {
+        let url = format!("{}/analyze/count", self.base_url);
+        let response = self.client
+            .get(&url)
+            .send()
+            .await?
+            .json::<Value>()
+            .await?;
+        Ok(response)
+    }
+
+    pub async fn get_daily_incidents(&self) -> Result<Value> {
+        let url = format!("{}/sources/daily", self.base_url);
+        let response = self.client
+            .get(&url)
+            .query(&[("days", 30)])
+            .send()
+            .await?
+            .json::<Value>()
+            .await?;
+        Ok(response)
+    }
+
+    pub async fn get_hourly_severity(&self) -> Result<Value> {
+        let url = format!("{}/sources/hourly-severity", self.base_url);
+        let response = self.client
+            .get(&url)
+            .send()
+            .await?
+            .json::<Value>()
+            .await?;
+        Ok(response)
     }
 
     pub async fn get_risk_zones(&self, grid_size: f64) -> Result<Value> {

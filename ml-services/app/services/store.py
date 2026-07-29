@@ -22,7 +22,7 @@ def _to_isoformat(value):
     return str(value)
 
 
-def get_stored_incidents(limit: int = 500) -> list[dict]:
+def get_stored_incidents(limit: int = 500, offset: int = 0) -> list[dict]:
     """Read incidents straight from Postgres — no live connector calls."""
     with get_conn() as conn:
         cursor = conn.cursor()
@@ -34,9 +34,9 @@ def get_stored_incidents(limit: int = 500) -> list[dict]:
                    last_seen_at
             FROM incidents
             ORDER BY timestamp DESC NULLS LAST
-            LIMIT %s
+            LIMIT %s OFFSET %s
             """,
-            (limit,),
+            (limit, offset),
         )
         rows = cursor.fetchall()
 
@@ -340,6 +340,93 @@ def save_analysis(incident_id: str, result: dict):
             m["model"],
             m["processing_time_ms"],
         ))
+
+
+def get_incidents_count() -> int:
+    """COUNT(*) over the entire incidents table — always the real total."""
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM incidents")
+        return cursor.fetchone()["count"]
+
+
+def get_analyses_count() -> int:
+    """COUNT(*) over the entire analyses table — always the real total."""
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM analyses")
+        return cursor.fetchone()["count"]
+
+
+def get_daily_incidents(days: int = 30) -> list[dict]:
+    """Aggregate incidents by calendar day over the full table.
+
+    Returns one row per day with the total incident count, covering the
+    last N days (default 30) up to the latest incident timestamp.
+    """
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                DATE(timestamp) AS day,
+                COUNT(*) AS count
+            FROM incidents
+            WHERE timestamp IS NOT NULL
+            GROUP BY DATE(timestamp)
+            ORDER BY day DESC
+            LIMIT %s
+        """, (days,))
+        rows = cursor.fetchall()
+
+    return [
+        {
+            "day": str(r["day"]),
+            "incidents": r["count"],
+        }
+        for r in rows
+    ]
+
+
+def get_hourly_severity() -> list[dict]:
+    """Aggregate all incidents by hour-of-day and severity in SQL.
+
+    Returns 24 rows (one per hour), each with severity counts and a total,
+    computed over the full incidents table regardless of fetch limits.
+    """
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                EXTRACT(HOUR FROM timestamp)::int AS hour,
+                COALESCE(severity, 'Unknown') AS severity,
+                COUNT(*) AS count
+            FROM incidents
+            WHERE timestamp IS NOT NULL
+            GROUP BY hour, severity
+            ORDER BY hour, severity
+        """)
+        rows = cursor.fetchall()
+
+    # Build 24-row result with all four severity keys pre-seeded.
+    SEVERITY_KEYS = ["Critical", "High", "Moderate", "Low"]
+    hourly = {
+        h: {s: 0 for s in SEVERITY_KEYS} | {"hour": h, "total": 0}
+        for h in range(24)
+    }
+    for r in rows:
+        h = r["hour"]
+        sev = r["severity"]
+        count = r["count"]
+        # Map DB severity to one of the four known keys
+        key = next((s for s in SEVERITY_KEYS if s.lower() == sev.lower()), None)
+        if key:
+            hourly[h][key] += count
+            hourly[h]["total"] += count
+        else:
+            # Unknown severity still counts toward total
+            hourly[h]["total"] += count
+
+    return [hourly[h] for h in range(24)]
 
 
 def get_dashboard_stats():

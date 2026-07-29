@@ -62,6 +62,16 @@ const TIME_FILTERS = [
 ];
 const DEFAULT_TIME_FILTER = "active";
 
+const LIMIT_BY_TIME_FILTER = {
+  active: 500,
+  week: 3000,
+  month: 5000,
+  "3month": 10000,
+  "6month": 15000,
+  year: 20000,
+  all: 30000,
+};
+
 // A source has to re-confirm an incident this many consecutive ingest
 // cycles (each ~30 min, see ml-services/scheduler.py) before we trust it as
 // "active" for sources with no native lifecycle field. Two cycles filters
@@ -183,7 +193,13 @@ const GEO_BOUNDS = [
   { country: "France", latMin: 42.3, latMax: 51.1, lngMin: -4.8, lngMax: 8.2 },
   { country: "China", latMin: 18.0, latMax: 53.6, lngMin: 73.5, lngMax: 134.8 },
   { country: "Russia", latMin: 41.0, latMax: 82.0, lngMin: 19.0, lngMax: 180.0 },
-  { country: "Brazil", latMin: -33.8, latMax: 5.3, lngMin: -74.0, lngMax: -34.7 }
+  { country: "Brazil", latMin: -33.8, latMax: 5.3, lngMin: -74.0, lngMax: -34.7 },
+  { country: "Asia-Pacific Region", latMin: -10.0, latMax: 55.0, lngMin: 60.0, lngMax: 150.0 },
+  { country: "Europe & Middle East", latMin: 20.0, latMax: 70.0, lngMin: -30.0, lngMax: 60.0 },
+  { country: "Oceania Region", latMin: -50.0, latMax: 0.0, lngMin: 110.0, lngMax: 180.0 },
+  { country: "Americas Region", latMin: -60.0, latMax: 85.0, lngMin: -170.0, lngMax: -30.0 },
+  { country: "African Region", latMin: -35.0, latMax: 38.0, lngMin: -20.0, lngMax: 55.0 },
+  { country: "International Waters / Other", latMin: -90.0, latMax: 90.0, lngMin: -180.0, lngMax: 180.0 }
 ];
 
 const getOfflineCountry = (lat, lng) => {
@@ -260,6 +276,19 @@ const FlyToCenter = ({ center, zoom }) => {
   return null;
 };
 
+const FlyToBounds = ({ bounds }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (bounds) {
+      map.fitBounds(
+        [[bounds.latMin, bounds.lngMin], [bounds.latMax, bounds.lngMax]],
+        { padding: [40, 40] }
+      );
+    }
+  }, [bounds, map]);
+  return null;
+};
+
 /** Recalculates Leaflet's internal size cache after the container's
  *  dimensions change (fullscreen toggle, sidebar collapse, etc). Without
  *  this, tiles render into the old container size and leave gray gaps. */
@@ -284,6 +313,7 @@ const LiveMap = () => {
   const mapFrameRef = useRef(null);
 
   const [incidents, setIncidents] = useState([]);
+  const [incidentTotal, setIncidentTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeSeverities, setActiveSeverities] = useState(new Set(SEVERITY_ORDER));
@@ -315,6 +345,19 @@ const LiveMap = () => {
   const [dismissedZoneIds, setDismissedZoneIds] = useState(new Set());
   const [liveUserCoords, setLiveUserCoords] = useState(null);
   const watchIdRef = useRef(null);
+  const incidentLimitRef = useRef(LIMIT_BY_TIME_FILTER[activeTimeFilter] ?? 10000);
+
+  // Check permission status on mount so we don't re-ask if already granted.
+  // Without this, navigating back to the Map tab remounts the component and
+  // resets locationStatus to "prompt", triggering a redundant permission prompt.
+  useEffect(() => {
+    if (!navigator?.permissions) return;
+    navigator.permissions.query({ name: "geolocation" }).then((status) => {
+      if (status.state === "granted") {
+        setLocationStatus("granted");
+      }
+    }).catch(() => {});
+  }, []);
 
   const requestLocation = useCallback(() => {
     if (!navigator?.geolocation) {
@@ -328,7 +371,13 @@ const LiveMap = () => {
         setLiveUserCoords([coords.latitude, coords.longitude]);
         setLocationStatus("granted");
       },
-      () => setLocationStatus("denied"),
+      (err) => {
+        if (err.code === 1) {
+          setLocationStatus("denied");
+        } else {
+          setLocationStatus("granted");
+        }
+      },
       { timeout: 10000, enableHighAccuracy: true }
     );
   }, []);
@@ -413,26 +462,34 @@ const LiveMap = () => {
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
-  const load = useCallback(async (isRefresh = false) => {
+  const load = useCallback(async (isRefresh = false, limit) => {
+    const lim = limit != null ? limit : 10000;
+    incidentLimitRef.current = lim;
     setLoading(true);
     setError(null);
     try {
       if (isRefresh) invalidateDashboardCache();
-      const data = await getDashboard({ force: isRefresh });
+      const data = await getDashboard({ force: isRefresh, incidentLimit: lim });
       const list = Array.isArray(data?.all_incidents) ? data.all_incidents : [];
       setIncidents(list);
+      setIncidentTotal(data?.summary?.total_incidents ?? list.length);
       setLastUpdated(new Date());
-    } catch (err) {
+    } catch {
       setError("Couldn't reach the Kavach analysis service.");
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Fetch on mount and whenever the time window filter changes.
+  // Each time window has its own incident limit so wider windows fetch
+  // progressively more data instead of always pulling 10k on load.
   useEffect(() => {
     requestLocation();
-    load();
-  }, [load, requestLocation]);
+    const limit = LIMIT_BY_TIME_FILTER[activeTimeFilter] ?? 10000;
+    incidentLimitRef.current = limit;
+    load(true, limit);
+  }, [load, requestLocation, activeTimeFilter]);
 
   // Fetch historical risk-zone data once on mount. This is a static aggregate
   // (counts by grid cell + category + month) so it doesn't need auto-refresh.
@@ -442,7 +499,7 @@ const LiveMap = () => {
 
   // Auto-refresh every 3 minutes so the map stays live without manual polling.
   useEffect(() => {
-    const interval = setInterval(() => load(true), 3 * 60 * 1000);
+    const interval = setInterval(() => load(true, incidentLimitRef.current), 3 * 60 * 1000);
     return () => clearInterval(interval);
   }, [load]);
 
@@ -469,16 +526,6 @@ const LiveMap = () => {
       country: getOfflineCountry(i.latitude, i.longitude),
     }));
   }, [incidents]);
-
-  const countryData = useMemo(() => {
-    const list = {};
-    processedIncidents.forEach((i) => {
-      if (isValidCoordinateRange(i.latitude, i.longitude)) {
-        list[i.country] = (list[i.country] || 0) + 1;
-      }
-    });
-    return Object.entries(list).sort((a, b) => b[1] - a[1]);
-  }, [processedIncidents]);
 
   const searchedIncidents = useMemo(() => {
     if (!searchTerm.trim()) return processedIncidents;
@@ -516,6 +563,20 @@ const LiveMap = () => {
       return hasValidGeoRange && isSeverityActive && isCountryActive && isWithinTimeWindow;
     });
   }, [searchedIncidents, activeSeverities, activeCountries, timeCutoff, activeTimeFilter]);
+
+  const countryData = useMemo(() => {
+    const list = {};
+    visibleIncidents.forEach((i) => {
+      list[i.country] = (list[i.country] || 0) + 1;
+    });
+    return Object.entries(list).sort((a, b) => b[1] - a[1]);
+  }, [visibleIncidents]);
+
+  const countryFocus = useMemo(() => {
+    if (activeCountries.size !== 1) return null;
+    const country = [...activeCountries][0];
+    return GEO_BOUNDS.find((b) => b.country === country) || null;
+  }, [activeCountries]);
 
   // Resolve the incident to fly to: prefer an id match against the loaded
   // list (gives us the full incident record for the popup), but fall back
@@ -640,9 +701,7 @@ const LiveMap = () => {
           <p className="v-dash-subtitle">
             {loading
               ? "Loading incidents…"
-              : `${visibleIncidents.length} of ${incidents.length} verified incidents shown · ${
-                  TIME_FILTERS.find((f) => f.key === activeTimeFilter)?.label
-                }`}
+              : `${visibleIncidents.length} of ${incidentTotal} verified incidents shown`}
             {!loading && lastUpdated && (
               <span className="v-dash-subtitle-meta">
                 <Clock size={12} /> Updated {timeAgo(lastUpdated.toISOString())}
@@ -833,11 +892,9 @@ const LiveMap = () => {
             <button
               className="v-map-control-btn"
               onClick={() => {
-                // Recentering on "me" is now an explicit focus action too,
-                // so it correctly overrides any pending incident focus and
-                // is the ONLY thing that flies back to the user.
                 setHasPendingFocus(false);
                 setSelectedIncident(null);
+                setActiveCountries(new Set());
                 setUserLocation((loc) => [...loc]);
               }}
               title="Recenter on my location"
@@ -888,11 +945,12 @@ const LiveMap = () => {
               (Locate button, search jump, proximity "View on map") is
               pending — this is what stops the map snapping back to the
               user's own position instead of the incident they asked for. */}
-          {locationStatus === "granted" && !hasPendingFocus && (
-            <FlyToCenter center={userLocation} zoom={6} />
-          )}
           {hasPendingFocus && focusIncident && <FlyToIncident incident={focusIncident} />}
           {hasPendingFocus && selectedIncident && <FlyToIncident incident={selectedIncident} />}
+          <FlyToBounds bounds={countryFocus} />
+          {locationStatus === "granted" && !hasPendingFocus && !countryFocus && (
+            <FlyToCenter center={userLocation} zoom={6} />
+          )}
 
           {/* Historical risk-zone overlay — aggregated incident counts by
                grid cell, category, and month. No ML, just honest counting.

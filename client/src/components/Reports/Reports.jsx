@@ -25,7 +25,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import PageShell from "../Layout/PageShell";
-import { getAllSources, getAllAnalyses, analyzeIncident } from "../../api/varunaApi";
+import { getAllSources, getAllAnalyses, analyzeIncident, getIncidentsCount } from "../../api/varunaApi";
 import { SeverityBadge, PriorityScore, ConfidenceBadge } from "../common/Severity";
 import { SEVERITY_ORDER } from "../common/severityConfig";
 import "./Reports.css";
@@ -292,35 +292,95 @@ const SEVERITY_RANK = { Critical: 3, High: 2, Moderate: 1, Low: 0 };
 
 const Reports = () => {
   const [sources, setSources] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(false);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [activeSeverities, setActiveSeverities] = useState(new Set(SEVERITY_ORDER));
   const [showModal, setShowModal] = useState(false);
   const [sortKey, setSortKey] = useState("newest");
   const [page, setPage] = useState(1);
+  const pageCache = useRef(new Map());
 
   const [analyzing, setAnalyzing] = useState(false);
   const [freshResults, setFreshResults] = useState(null);
   const [analyzeError, setAnalyzeError] = useState(null);
 
+  const fetchPage = useCallback(async (pageNum) => {
+    const cached = pageCache.current.get(pageNum);
+    if (cached) return cached;
+    const data = await getAllSources(PAGE_SIZE, (pageNum - 1) * PAGE_SIZE);
+    const list = Array.isArray(data) ? data : [];
+    pageCache.current.set(pageNum, list);
+    return list;
+  }, []);
+
+  const prefetchNext = useCallback((currentPage) => {
+    const next = currentPage + 1;
+    if (!pageCache.current.has(next)) {
+      fetchPage(next).catch(() => {});
+    }
+  }, [fetchPage]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getAllSources();
-      setSources(Array.isArray(data) ? data : []);
+      if (search.trim()) {
+        const [data, count] = await Promise.all([
+          getAllSources(),
+          getIncidentsCount().catch(() => null),
+        ]);
+        const list = Array.isArray(data) ? data : [];
+        setSources(list);
+        setTotalCount(count ?? list.length);
+        pageCache.current.clear();
+      } else {
+        const [count] = await Promise.all([
+          getIncidentsCount().catch(() => null),
+        ]);
+        const list = await fetchPage(page);
+        setSources(list);
+        setTotalCount(count ?? 0);
+        prefetchNext(page);
+      }
     } catch (err) {
       console.error("Failed to load sources:", err);
       setError("Couldn't reach the Kavach analysis service. Check that the backend is running.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, page, fetchPage, prefetchNext]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const changePage = useCallback(async (newPage) => {
+    if (newPage === page) return;
+    setPage(newPage);
+    if (search.trim()) {
+      setPageLoading(false);
+      return;
+    }
+    const cached = pageCache.current.get(newPage);
+    if (cached) {
+      setSources(cached);
+      prefetchNext(newPage);
+      return;
+    }
+    setPageLoading(true);
+    try {
+      const list = await fetchPage(newPage);
+      setSources(list);
+      prefetchNext(newPage);
+    } catch {
+      setSources([]);
+    } finally {
+      setPageLoading(false);
+    }
+  }, [page, search, fetchPage, prefetchNext]);
 
   const runFreshAnalysis = async () => {
     setAnalyzing(true);
@@ -387,12 +447,19 @@ const Reports = () => {
     return list;
   }, [sources, search, activeSeverities, sortKey]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const isSearchActive = search.trim().length > 0;
+  const totalPages = Math.max(1, Math.ceil(
+    isSearchActive ? filtered.length : totalCount / PAGE_SIZE
+  ));
   const currentPage = Math.min(page, totalPages);
   const paginated = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, currentPage]);
+    if (isSearchActive) {
+      const start = (currentPage - 1) * PAGE_SIZE;
+      return filtered.slice(start, start + PAGE_SIZE);
+    }
+    // Server-side pagination: sources only holds the current page
+    return sources;
+  }, [filtered, sources, currentPage, isSearchActive]);
 
   const severityCounts = useMemo(() => {
     const out = { Low: 0, Moderate: 0, High: 0, Critical: 0 };
@@ -426,7 +493,7 @@ const Reports = () => {
         <div>
           <h1 className="v-dash-title">Incidents</h1>
           <p className="v-dash-subtitle">
-            {loading ? "Loading…" : `${filtered.length} of ${sources.length} raw incidents`}
+            {loading ? "Loading…" : `${isSearchActive ? filtered.length : totalCount} total incidents`}
           </p>
         </div>
         <div className="v-dash-header-actions">
@@ -556,6 +623,7 @@ const Reports = () => {
       </div>
 
       <div className="v-panel v-incidents-table-panel">
+        {pageLoading && <div className="v-page-loading-bar" />}
         {(loading) && (
           <div className="v-loading-overlay">
             <span className="v-loading-spinner" />
@@ -612,12 +680,17 @@ const Reports = () => {
             {totalPages > 1 && (
               <div className="v-pagination-bar">
                 <span className="v-pagination-info">
-                  Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length}
+                  {(() => {
+                    const total = isSearchActive ? filtered.length : totalCount;
+                    const from = (currentPage - 1) * PAGE_SIZE + 1;
+                    const to = Math.min(currentPage * PAGE_SIZE, total);
+                    return `Showing ${from}–${to} of ${total}`;
+                  })()}
                 </span>
                 <div className="v-pagination-controls">
                   <button
                     className="v-btn v-pagination-btn"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    onClick={() => changePage(currentPage - 1)}
                     disabled={currentPage === 1}
                     aria-label="Previous page"
                   >
@@ -626,7 +699,7 @@ const Reports = () => {
                   <span className="v-pagination-page v-mono">{currentPage} / {totalPages}</span>
                   <button
                     className="v-btn v-pagination-btn"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    onClick={() => changePage(currentPage + 1)}
                     disabled={currentPage === totalPages}
                     aria-label="Next page"
                   >

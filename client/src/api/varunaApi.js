@@ -26,9 +26,39 @@ client.interceptors.request.use((config) => {
   return config;
 });
 
+/** GET /incidents/count — real COUNT(*) not capped by any fetch limit */
+export const getIncidentsCount = async () => {
+  const { data } = await client.get("/incidents/count");
+  return data?.count ?? null;
+};
+
+/** GET /incidents/analyze/count — real COUNT(*) for analyses */
+export const getAnalyzedCount = async () => {
+  const { data } = await client.get("/incidents/analyze/count");
+  return data?.count ?? null;
+};
+
+/** GET /incidents/hourly-severity — 24-row aggregation over full table */
+export const getHourlySeverity = async () => {
+  const { data } = await client.get("/incidents/hourly-severity");
+  return Array.isArray(data) ? data : [];
+};
+
+/** GET /incidents/daily — daily incident counts over full table (last 30 days) */
+export const getDailyIncidents = async () => {
+  const { data } = await client.get("/incidents/daily");
+  return Array.isArray(data) ? data : [];
+};
+
 /** GET /incidents — raw deduplicated incidents, no AI analysis */
-export const getIncidents = async (limit = 50000) => {
-  const { data } = await client.get("/incidents", { params: { limit } });
+// Default limit 3000: ORDER BY timestamp DESC fetches the N most recent
+// incidents, which is the correct behavior for "what's happening now"
+// dashboards.  The incidents table is ~48k rows (Jul 2026) so 50000 was
+// effectively unbounded, causing slow page loads and excessive Neon DB
+// egress.  The chat/RAG path is unaffected — it queries the DB
+// independently via retriever.py with its own limit (default 10).
+export const getIncidents = async (limit = 3000, offset = 0) => {
+  const { data } = await client.get("/incidents", { params: { limit, offset } });
   return Array.isArray(data) ? data : [];
 };
 
@@ -85,10 +115,13 @@ const DASHBOARD_CACHE_MS = 60 * 1000; // backend data itself only refreshes ever
 let dashboardCache = null; // { data, fetchedAt }
 let dashboardInFlight = null; // Promise, shared by concurrent callers
 
-const buildDashboard = async () => {
-  const [incidents, analyzed] = await Promise.all([
-    getIncidents(),
+const buildDashboard = async (incidentLimit) => {
+  const [incidents, analyzed, incidentsCount, hourlySeverity, dailyIncidents] = await Promise.all([
+    getIncidents(incidentLimit),
     getAnalyzedIncidents(),
+    getIncidentsCount().catch(() => null),
+    getHourlySeverity().catch(() => null),
+    getDailyIncidents().catch(() => null),
   ]);
 
   const analysisByIncidentId = new Map(analyzed.map((a) => [a.incident_id, a]));
@@ -104,17 +137,9 @@ const buildDashboard = async () => {
       longitude: inc.longitude,
       timestamp: inc.timestamp,
       updated_at: inc.updated_at ?? null,
-      // --- Real lifecycle fields (see backend migration 0005) ---
-      // 'active' | 'resolved' | 'unknown' — source-native status when
-      // available (GDACS, USGS); 'unknown' for everything else.
       status: inc.status ?? null,
-      // Source's own last-modified time, when the source provides one.
       source_updated_at: inc.source_updated_at ?? null,
-      // Source-provided estimated/actual end of the event, when available.
       expected_end: inc.expected_end ?? null,
-      // How many consecutive ingest cycles have re-confirmed this incident
-      // is still present in its source feed — the fallback "still active"
-      // signal for sources with no native status field.
       confirmation_streak: inc.confirmation_streak ?? 0,
       last_seen_at: inc.last_seen_at ?? null,
       url: inc.url,
@@ -161,7 +186,9 @@ const buildDashboard = async () => {
 
   return {
     summary: {
-      total_incidents: incidents.length,
+      // Real COUNT(*) from Postgres, falls back to .length if the count
+      // endpoint is unavailable (e.g. during deployment transition).
+      total_incidents: incidentsCount ?? incidents.length,
       total_analyzed: analyzed.length,
       average_priority_score: scoreCount ? scoreSum / scoreCount : null,
     },
@@ -171,6 +198,8 @@ const buildDashboard = async () => {
     top_critical_incidents,
     recent_analyses,
     all_incidents: merged,
+    hourly_severity: hourlySeverity,
+    daily_incidents: dailyIncidents,
   };
 };
 
@@ -178,19 +207,22 @@ const buildDashboard = async () => {
  * Cached, deduped entry point used by Dashboard/LiveMap/Alerts.
  * Pass { force: true } (e.g. from a Refresh button) to bypass the cache.
  */
-export const getDashboard = async ({ force = false } = {}) => {
-  const isFresh = dashboardCache && Date.now() - dashboardCache.fetchedAt < DASHBOARD_CACHE_MS;
+export const getDashboard = async ({ force = false, incidentLimit } = {}) => {
+  const cacheKey = incidentLimit ?? 3000;
+  const cacheEntry = dashboardCache?.key === cacheKey ? dashboardCache : null;
+  const isFresh = cacheEntry && Date.now() - cacheEntry.fetchedAt < DASHBOARD_CACHE_MS
+    && cacheEntry.data?.daily_incidents != null;
   if (!force && isFresh) {
-    return dashboardCache.data;
+    return cacheEntry.data;
   }
 
   if (!force && dashboardInFlight) {
     return dashboardInFlight;
   }
 
-  dashboardInFlight = buildDashboard()
+  dashboardInFlight = buildDashboard(incidentLimit)
     .then((data) => {
-      dashboardCache = { data, fetchedAt: Date.now() };
+      dashboardCache = { key: cacheKey, data, fetchedAt: Date.now() };
       return data;
     })
     .finally(() => {

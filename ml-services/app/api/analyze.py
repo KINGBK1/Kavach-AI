@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from app.models.request import IncidentRequest
 from app.models.incident import Incident
 from app.services.analyzer import analyze_incident, analyze_fetched_incident
-from app.services.store import get_dashboard_stats, get_stored_analyses
+from app.services.store import get_dashboard_stats, get_stored_analyses, get_analyses_count
 from app.services.citizen_reports import (
     check_rate_limit,
     find_corroborating_incidents,
@@ -156,6 +156,12 @@ def reject_report(action: ReviewAction):
 @router.get("/all")
 def analyze_all(limit: int = Query(default=50, ge=1, le=50000)):
     return get_stored_analyses(limit=limit)
+
+
+@router.get("/count")
+def analyses_count():
+    """Real COUNT(*) across the full analyses table — not capped by any limit."""
+    return {"count": get_analyses_count()}
 
 @router.get("/dashboard")
 def dashboard():

@@ -34,7 +34,7 @@ import {
 } from "recharts";
 import PageShell from "../Layout/PageShell";
 import JudgeWelcomeBanner from "./JudgeWelcomeBanner";
-import { getDashboard } from "../../api/varunaApi";
+import { getDashboard, getDailyIncidents } from "../../api/varunaApi";
 import { lookUpLocationName } from "../../utils/geolocation";
 import { SeverityBadge } from "../common/Severity";
 import InfoTooltip from "../common/InfoTooltip";
@@ -61,13 +61,6 @@ const SEVERITY_COLORS = {
 
 const resolveSeverityColor = (severity) =>
   SEVERITY_COLORS[severity?.toLowerCase()] || SEVERITY_COLORS.unknown;
-
-const parseIncidentDate = (item) => {
-  const rawDate = item?.timestamp || item?.analyzed_at;
-  if (!rawDate) return null;
-  const parsed = new Date(String(rawDate).replace(" ", "T"));
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
 
 const StatCard = ({ label, value, loading, icon: Icon, trend, trendClass = "positive", info }) => (
   <div className="v-premium-kpi-card">
@@ -139,12 +132,21 @@ const UserDashboard = () => {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [locationLabels, setLocationLabels] = useState({});
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
+  const [dailyFetch, setDailyFetch] = useState(null);
 
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date().toLocaleTimeString());
     }, 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDailyIncidents()
+      .then((res) => { if (!cancelled) setDailyFetch(res); })
+      .catch(() => { if (!cancelled) setDailyFetch(null); });
+    return () => { cancelled = true; };
   }, []);
 
   const load = useCallback(async (isRefresh = false) => {
@@ -203,11 +205,7 @@ const UserDashboard = () => {
   const sourceBreakdown = data?.source_breakdown || {};
   const criticalIncidents = data?.top_critical_incidents || [];
   const recentAnalyses = data?.recent_analyses || [];
-  // Full incident set (same field LiveMap consumes) — this is what the
-  // scatter plot below needs so it represents everything in the DB, not
-  // just the handful of items in the "recent" feed.
   const allIncidents = data?.all_incidents || [];
-
   // Category distribution, capped to the top N with the remainder grouped
   // into a single "Other" row so long backend lists stay scannable.
   const categoryTreeData = useMemo(() => {
@@ -278,38 +276,42 @@ const UserDashboard = () => {
   );
 
   const dailyIncidentData = useMemo(() => {
-    const datedIncidents = allIncidents
-      .map((item) => ({ ...item, parsedDate: parseIncidentDate(item) }))
-      .filter((item) => item.parsedDate);
-
-    if (!datedIncidents.length) return [];
-
-    const latestTime = Math.max(...datedIncidents.map((item) => item.parsedDate.getTime()));
-    const latestDay = new Date(latestTime);
+    const raw = data?.daily_incidents;
+    if (raw && raw.length) {
+      return raw.map((r) => ({
+        key: r.day,
+        day: dayFormatter.format(new Date(r.day + "T00:00:00")),
+        incidents: r.incidents,
+      })).reverse();
+    }
+    // Fallback: compute from all_incidents if backend endpoint unavailable
+    const dated = allIncidents
+      .map((item) => {
+        const d = item?.timestamp || item?.analyzed_at;
+        if (!d) return null;
+        const p = new Date(String(d).replace(" ", "T"));
+        return Number.isNaN(p.getTime()) ? null : p;
+      })
+      .filter(Boolean);
+    if (!dated.length) return [];
+    const latest = Math.max(...dated.map((d) => d.getTime()));
+    const latestDay = new Date(latest);
     latestDay.setHours(0, 0, 0, 0);
-    const startDay = new Date(latestDay.getTime() - 13 * DAY_MS);
-
-    const rows = Array.from({ length: 14 }, (_, index) => {
-      const date = new Date(startDay.getTime() + index * DAY_MS);
+    const start = new Date(latestDay.getTime() - 29 * DAY_MS);
+    const rows = Array.from({ length: 30 }, (_, i) => {
+      const date = new Date(start.getTime() + i * DAY_MS);
       const key = date.toISOString().slice(0, 10);
-      return {
-        key,
-        day: dayFormatter.format(date),
-        incidents: 0
-      };
+      return { key, day: dayFormatter.format(date), incidents: 0 };
     });
-    const rowByKey = new Map(rows.map((row) => [row.key, row]));
-
-    datedIncidents.forEach((item) => {
-      const day = new Date(item.parsedDate);
+    const byKey = new Map(rows.map((r) => [r.key, r]));
+    dated.forEach((d) => {
+      const day = new Date(d);
       day.setHours(0, 0, 0, 0);
-      const key = day.toISOString().slice(0, 10);
-      const row = rowByKey.get(key);
-      if (row) row.incidents += 1;
+      const r = byKey.get(day.toISOString().slice(0, 10));
+      if (r) r.incidents += 1;
     });
-
     return rows;
-  }, [allIncidents, dayFormatter]);
+  }, [data?.daily_incidents, allIncidents, dayFormatter]);
 
   const totalDailyIncidents = useMemo(
     () => dailyIncidentData.reduce((sum, row) => sum + row.incidents, 0),
@@ -324,38 +326,19 @@ const UserDashboard = () => {
   );
 
   const incidentTrend = useMemo(() => {
-    const datedIncidents = allIncidents
-      .map(parseIncidentDate)
-      .filter(Boolean);
-
-    if (!datedIncidents.length) return null;
-
-    const latestTime = Math.max(...datedIncidents.map((date) => date.getTime()));
-    const latestDay = new Date(latestTime);
-    latestDay.setHours(23, 59, 59, 999);
-    const currentStart = latestDay.getTime() - 7 * DAY_MS + 1;
-    const previousStart = currentStart - 7 * DAY_MS;
-
-    let currentCount = 0;
-    let previousCount = 0;
-    datedIncidents.forEach((date) => {
-      const time = date.getTime();
-      if (time >= currentStart && time <= latestDay.getTime()) currentCount += 1;
-      else if (time >= previousStart && time < currentStart) previousCount += 1;
-    });
-
-    if (currentCount === 0 && previousCount === 0) return null;
-    if (previousCount === 0) {
-      return { label: currentCount > 0 ? "+100%" : "0%", className: currentCount > 0 ? "positive" : "neutral" };
-    }
-
-    const change = ((currentCount - previousCount) / previousCount) * 100;
+    if (dailyIncidentData.length < 2) return null;
+    const mid = Math.max(1, Math.floor(dailyIncidentData.length / 2));
+    const recent = dailyIncidentData.slice(-mid).reduce((s, r) => s + r.incidents, 0);
+    const previous = dailyIncidentData.slice(0, -mid).reduce((s, r) => s + r.incidents, 0);
+    if (recent === 0 && previous === 0) return null;
+    if (previous === 0) return { label: "+100%", className: "positive" };
+    const change = ((recent - previous) / previous) * 100;
     const sign = change > 0 ? "+" : "";
     return {
       label: `${sign}${change.toFixed(1)}%`,
       className: change > 0 ? "positive" : change < 0 ? "negative" : "neutral"
     };
-  }, [allIncidents]);
+  }, [dailyIncidentData]);
 
   // --- Incidents by hour, split by severity -------------------------------
   // The previous bubble scatter (size = count, y = avg priority score,
@@ -368,37 +351,15 @@ const UserDashboard = () => {
   // so both volume AND severity mix are visible immediately, for the full
   // incident set (not just a small "recent" sample).
   const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
-  const SEVERITY_KEYS = ["Critical", "High", "Moderate", "Low"];
 
   const hourlySeverityData = useMemo(() => {
-    const source = allIncidents.length ? allIncidents : recentAnalyses;
-    if (!source.length) return [];
-
-    // One row per hour, pre-seeded so every hour appears even with 0 incidents.
-    const rows = HOUR_LABELS.map((label, hour) => ({
-      hour,
-      label,
-      Critical: 0,
-      High: 0,
-      Moderate: 0,
-      Low: 0,
-      total: 0
+    const raw = data?.hourly_severity;
+    if (!raw || !raw.length) return [];
+    return raw.map((r) => ({
+      ...r,
+      label: HOUR_LABELS[r.hour] ?? `${String(r.hour).padStart(2, "0")}:00`,
     }));
-
-    source.forEach((item) => {
-      const rawDate = item.analyzed_at || item.timestamp;
-      const incidentDate = new Date((rawDate || "").replace(" ", "T") || Date.now());
-      const hourOfDay = Number.isNaN(incidentDate.getTime()) ? 0 : incidentDate.getHours();
-      const rawSeverity = (item.severity || "").toLowerCase();
-      const severityKey =
-        SEVERITY_KEYS.find((s) => s.toLowerCase() === rawSeverity) || "Low";
-
-      rows[hourOfDay][severityKey] += 1;
-      rows[hourOfDay].total += 1;
-    });
-
-    return rows;
-  }, [allIncidents, recentAnalyses]);
+  }, [data?.hourly_severity]);
 
   const totalHourlyIncidents = useMemo(
     () => hourlySeverityData.reduce((sum, r) => sum + r.total, 0),
@@ -507,7 +468,7 @@ const UserDashboard = () => {
         <div className="v-premium-kpi-grid">
           <StatCard
             label="TOTAL INCIDENTS TRACKED"
-            value={summary.total_incidents ?? "0"}
+            value={summary.total_incidents != null ? summary.total_incidents.toLocaleString() : "0"}
             loading={loading}
             icon={TrendingUp}
             trend={incidentTrend?.label}
@@ -530,7 +491,7 @@ const UserDashboard = () => {
           />
           <StatCard
             label="AI ANALYSIS EFFICIENCY"
-            value={summary.total_analyzed != null ? `${summary.total_analyzed} units` : "—"}
+            value={summary.total_analyzed != null ? summary.total_analyzed.toLocaleString() : "—"}
             loading={loading}
             icon={Zap}
             info="How many raw incident reports have been fully processed by the AI analysis pipeline (severity scored, categorized, actions generated)."

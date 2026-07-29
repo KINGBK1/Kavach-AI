@@ -18,12 +18,17 @@ use crate::state::AppState;
 #[derive(Deserialize)]
 pub struct LimitQuery {
     pub limit: Option<u32>,
+    pub offset: Option<u32>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/", get(get_incidents))
+        .route("/count", get(get_incidents_count))
+        .route("/hourly-severity", get(get_hourly_severity))
+        .route("/daily", get(get_daily_incidents))
         .route("/analyze", get(analyze_incidents))
+        .route("/analyze/count", get(get_analyses_count))
         .route("/report", post(submit_report))
         .route("/citizen-reports", get(list_citizen_reports))
         .route("/citizen-reports/promote", post(promote_report))
@@ -59,16 +64,73 @@ async fn list_citizen_reports(
     Ok(Json(reports))
 }
 
+async fn get_incidents_count(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, StatusCode> {
+    let client = AiClient::new(state.ai_service_url.clone());
+    let count = client
+        .get_incidents_count()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch incidents count: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(count))
+}
+
+async fn get_analyses_count(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, StatusCode> {
+    let client = AiClient::new(state.ai_service_url.clone());
+    let count = client
+        .get_analyses_count()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch analyses count: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(count))
+}
+
+async fn get_daily_incidents(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, StatusCode> {
+    let client = AiClient::new(state.ai_service_url.clone());
+    let data = client
+        .get_daily_incidents()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch daily incidents: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(data))
+}
+
+async fn get_hourly_severity(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Value>, StatusCode> {
+    let client = AiClient::new(state.ai_service_url.clone());
+    let data = client
+        .get_hourly_severity()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch hourly severity: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(data))
+}
+
 async fn get_incidents(
     State(state): State<Arc<AppState>>,
     Query(params): Query<LimitQuery>,
 ) -> Result<Json<Vec<Value>>, StatusCode> {
     let limit = params.limit.unwrap_or(50);
+    let offset = params.offset.unwrap_or(0);
 
     let client = AiClient::new(state.ai_service_url.clone());
 
     let incidents = client
-        .get_all_incidents(limit)
+        .get_all_incidents(limit, offset)
         .await
         .map_err(|e| {
             tracing::error!("Failed to fetch incidents: {:?}", e);

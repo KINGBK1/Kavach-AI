@@ -944,3 +944,21 @@
   .v-modal { padding: 20px; }
   .v-modal-coords { grid-template-columns: 1fr; }
 }
+
+.v-page-loading-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent 30%, var(--accent, #3b82f6) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: v-page-loading-slide 1s ease-in-out infinite;
+  z-index: 5;
+  border-radius: 0 0 4px 4px;
+}
+
+@keyframes v-page-loading-slide {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
