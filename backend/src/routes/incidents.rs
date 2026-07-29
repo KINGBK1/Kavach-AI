@@ -30,6 +30,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/analyze", get(analyze_incidents))
         .route("/analyze/count", get(get_analyses_count))
         .route("/report", post(submit_report))
+        .route("/status", post(update_status))
         .route("/citizen-reports", get(list_citizen_reports))
         .route("/citizen-reports/promote", post(promote_report))
         .route("/citizen-reports/reject", post(reject_report))
@@ -344,6 +345,33 @@ async fn reject_report(
         .await
         .map_err(|e| {
             tracing::error!("Failed to reject report: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+pub struct StatusUpdateAction {
+    pub incident_id: String,
+    pub status: String,
+}
+
+/// Update incident status ('active' | 'resolved')
+async fn update_status(
+    State(state): State<Arc<AppState>>,
+    _auth: AuthUser,
+    Json(action): Json<StatusUpdateAction>,
+) -> Result<Json<Value>, StatusCode> {
+    let client = AiClient::new(state.ai_service_url.clone());
+    let payload = serde_json::json!({
+        "incident_id": action.incident_id,
+        "status": action.status,
+    });
+    let result = client
+        .post_json("/analyze/incidents/status", payload)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to update incident status: {:?}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     Ok(Json(result))

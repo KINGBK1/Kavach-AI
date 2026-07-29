@@ -28,6 +28,7 @@ import PageShell from "../Layout/PageShell";
 import { getAllSources, getAllAnalyses, analyzeIncident, getIncidentsCount } from "../../api/varunaApi";
 import { SeverityBadge, PriorityScore, ConfidenceBadge } from "../common/Severity";
 import { SEVERITY_ORDER } from "../common/severityConfig";
+import { RadarPulseLoader, ShieldAgentLoader, QuantumTypingLoader, KavachSkeleton } from "../common/CreativeLoaders";
 import "./Reports.css";
 
 const SEVERITY_COLORS = {
@@ -538,9 +539,8 @@ const Reports = () => {
             <Sparkles size={16} /> Fresh analysis results {freshResults ? `(${freshResults.length})` : ""}
           </div>
           {analyzing ? (
-            <div className="v-fresh-analysis-loading">
-              <span className="v-loading-spinner" />
-              <span>Running AI analysis on the latest incidents — this usually takes 30–60 seconds…</span>
+            <div className="v-fresh-analysis-loading" style={{ padding: "1.5rem 0", display: "flex", justifyContent: "center" }}>
+              <QuantumTypingLoader message="Running Gemini AI analysis across live satellite & news feeds..." />
             </div>
           ) : freshResults.length === 0 ? (
             <div className="v-empty-state v-empty-state-inline">
@@ -631,7 +631,10 @@ const Reports = () => {
           </div>
         )}
         {loading ? (
-          <div className="v-skeleton" style={{ height: 300, width: "100%" }} />
+          <div style={{ padding: "2rem 0" }}>
+            <RadarPulseLoader label="Fetching verified disaster incident records..." />
+            <KavachSkeleton height={200} />
+          </div>
         ) : filtered.length === 0 ? (
           <div className="v-empty-state">
             <h4>No incidents match</h4>

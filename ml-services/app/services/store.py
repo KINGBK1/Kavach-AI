@@ -23,17 +23,19 @@ def _to_isoformat(value):
 
 
 def get_stored_incidents(limit: int = 500, offset: int = 0) -> list[dict]:
-    """Read incidents straight from Postgres — no live connector calls."""
+    """Read incidents straight from Postgres, joined with AI analyses if present."""
     with get_conn() as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT id, source, title, description, category, latitude, longitude,
-                   severity, timestamp, url, location, country, updated_at,
-                   status, source_updated_at, expected_end, confirmation_streak,
-                   last_seen_at
-            FROM incidents
-            ORDER BY timestamp DESC NULLS LAST
+            SELECT i.id, i.source, COALESCE(a.incident_type, i.title) as title, i.description,
+                   i.category, i.latitude, i.longitude,
+                   COALESCE(a.severity, i.severity) as severity, i.timestamp, i.url, i.location, i.country, i.updated_at,
+                   i.status, i.source_updated_at, i.expected_end, i.confirmation_streak,
+                   i.last_seen_at, a.incident_type
+            FROM incidents i
+            LEFT JOIN analyses a ON i.id = a.incident_id
+            ORDER BY COALESCE(i.source_updated_at, i.updated_at, i.last_seen_at, i.timestamp) DESC NULLS LAST
             LIMIT %s OFFSET %s
             """,
             (limit, offset),
@@ -54,36 +56,13 @@ def get_stored_incidents(limit: int = 500, offset: int = 0) -> list[dict]:
             "url": row["url"],
             "location": row["location"],
             "country": row["country"],
-            # Last time this exact incident row was touched by an ingest
-            # upsert (any field change or re-sight). Weaker than the fields
-            # below, kept for backward compatibility with existing callers.
             "updated_at": _to_isoformat(row["updated_at"]),
-
-            # --- Real lifecycle fields (see migration 0005) -------------
-            # 'active' | 'resolved' | 'unknown'. Only GDACS and USGS
-            # currently set this to anything other than 'unknown' — other
-            # sources have no native concept of disaster lifecycle, so
-            # `confirmation_streak` is the fallback signal for them.
             "status": row["status"],
-            # The *source's own* last-modified time, when the source
-            # provides one. Stronger than `updated_at` because it reflects
-            # the source revising the record, not just us re-fetching it.
             "source_updated_at": _to_isoformat(row["source_updated_at"]),
-            # Source-provided estimated/actual end of the event, when
-            # available (GDACS only, currently). Null for point-in-time
-            # events (earthquakes) and sources without this concept.
             "expected_end": _to_isoformat(row["expected_end"]),
-            # How many consecutive ingest cycles have re-confirmed this
-            # incident is still present in its source feed. Resets to 0 the
-            # first cycle it's absent. This is the fallback "is it still
-            # active" signal for sources without native status — a single
-            # high number means multiple independent fetches over time have
-            # kept seeing it, which is more trustworthy than one timestamp.
             "confirmation_streak": row["confirmation_streak"],
-            # Last ingest cycle that actually saw this incident in its
-            # source feed (as opposed to `updated_at`, which also changes
-            # on unrelated field edits).
             "last_seen_at": _to_isoformat(row["last_seen_at"]),
+            "incident_type": row["incident_type"],
         }
         for row in rows
     ]
@@ -545,3 +524,23 @@ def get_dashboard_stats():
                 for row in recent_rows
             ],
         }
+
+
+def update_incident_status(incident_id: str, status: str) -> bool:
+    """Update the status ('active' | 'resolved') of an incident in Postgres."""
+    valid_statuses = {"active", "resolved", "unknown"}
+    clean_status = status.lower().strip()
+    if clean_status not in valid_statuses:
+        raise ValueError(f"Invalid status '{status}'. Must be one of: {valid_statuses}")
+
+    with get_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE incidents
+            SET status = %s, updated_at = NOW()
+            WHERE id = %s
+            """,
+            (clean_status, incident_id),
+        )
+        return cursor.rowcount > 0

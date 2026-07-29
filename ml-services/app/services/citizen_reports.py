@@ -247,6 +247,40 @@ def promote_citizen_report(report_id: str, reviewed_by: str) -> dict:
             ),
         )
 
+        if isinstance(analysis, dict):
+            severity_val = analysis.get("severity") or "Moderate"
+            incident_type_val = analysis.get("incident_type") or row["category"] or "Citizen Report"
+            priority_score_val = analysis.get("priority_score", 0.75)
+            confidence_val = analysis.get("confidence", 0.9)
+            summary_val = analysis.get("summary") or row["description"] or ""
+            actions_json = json.dumps(analysis.get("recommended_actions", []))
+            cursor.execute(
+                """
+                INSERT INTO analyses
+                (incident_id, incident_type, severity, priority_score, confidence, summary, recommended_actions, model, processing_time_ms)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (incident_id) DO UPDATE SET
+                    incident_type = EXCLUDED.incident_type,
+                    severity = EXCLUDED.severity,
+                    priority_score = EXCLUDED.priority_score,
+                    confidence = EXCLUDED.confidence,
+                    summary = EXCLUDED.summary,
+                    recommended_actions = EXCLUDED.recommended_actions,
+                    analyzed_at = NOW()
+                """,
+                (
+                    incident_id,
+                    incident_type_val,
+                    severity_val,
+                    priority_score_val,
+                    confidence_val,
+                    summary_val,
+                    actions_json,
+                    "citizen-promoted",
+                    0,
+                ),
+            )
+
         cursor.execute(
             "UPDATE citizen_reports SET status = 'promoted', promoted_incident_id = %s, reviewed_by = %s, reviewed_at = NOW() WHERE id = %s",
             (incident_id, reviewed_by, report_id),

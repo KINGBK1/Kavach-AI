@@ -9,20 +9,33 @@ const CLASS_BY_SEVERITY = {
   Critical: "v-sev-critical",
 };
 
+const normalizeSeverity = (sev) => {
+  if (!sev) return "Moderate";
+  const s = String(sev).trim();
+  const lower = s.toLowerCase();
+  if (lower === "low") return "Low";
+  if (lower === "moderate" || lower === "medium") return "Moderate";
+  if (lower === "high") return "High";
+  if (lower === "critical") return "Critical";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+
 /** Small colored pill: "● Critical" */
 export const SeverityBadge = ({ severity, size = "md" }) => {
-  const cls = CLASS_BY_SEVERITY[severity] || "v-sev-moderate";
+  const norm = normalizeSeverity(severity);
+  const cls = CLASS_BY_SEVERITY[norm] || "v-sev-moderate";
   return (
     <span className={`v-badge ${cls} v-badge-${size}`}>
       <span className="v-badge-dot" />
-      {severity || "Unknown"}
+      {norm}
     </span>
   );
 };
 
 /** Numeric priority score, color-matched to severity, monospace */
 export const PriorityScore = ({ score, severity }) => {
-  const cls = CLASS_BY_SEVERITY[severity] || "v-sev-moderate";
+  const norm = normalizeSeverity(severity);
+  const cls = CLASS_BY_SEVERITY[norm] || "v-sev-moderate";
   return (
     <span className={`v-priority-score v-mono ${cls}`}>
       {typeof score === "number" ? score : "—"}

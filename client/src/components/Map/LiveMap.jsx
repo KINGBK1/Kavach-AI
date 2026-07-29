@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { MapContainer, TileLayer, CircleMarker, Rectangle, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Marker, Rectangle, Popup, useMap } from "react-leaflet";
+import MarkerClusterGroup from "react-leaflet-cluster";
+import L from "leaflet";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { useLocation } from "react-router-dom";
 import {
   RefreshCw,
@@ -162,6 +166,24 @@ const getActiveStatusLabel = (incident) => {
   }
   return { text: "Recency-based only", tone: "unknown" };
 };
+
+// Small colored-dot divIcons standing in for the old per-incident
+// CircleMarker look, built once at module load (not per render/marker).
+// Needed because leaflet.markercluster's MarkerClusterGroup only manages
+// L.Marker instances (it calls setOpacity/setIcon on children while
+// clustering), not vector Path layers like CircleMarker — so incidents
+// have to be real Markers to be clusterable at all.
+const buildSeverityIcon = (color, radius) =>
+  L.divIcon({
+    className: "v-incident-dot-icon",
+    html: `<span style="display:block;width:${radius * 2}px;height:${radius * 2}px;border-radius:50%;background:${color};opacity:0.85;border:1.5px solid ${color};box-shadow:0 0 0 3px rgba(255,255,255,0.15);"></span>`,
+    iconSize: [radius * 2, radius * 2],
+    iconAnchor: [radius, radius],
+  });
+
+const SEVERITY_ICONS = Object.fromEntries(
+  Object.entries(SEVERITY_RADIUS).map(([sev, radius]) => [sev, buildSeverityIcon(SEVERITY_STROKE[sev], radius)])
+);
 
 const BASEMAPS = {
   streets: {
@@ -345,6 +367,10 @@ const LiveMap = () => {
   const [dismissedZoneIds, setDismissedZoneIds] = useState(new Set());
   const [liveUserCoords, setLiveUserCoords] = useState(null);
   const watchIdRef = useRef(null);
+  // Tracks the incident id of the zone currently surfaced in nearbyZone (or
+  // null). See the proximity-detection effect below for why this needs to
+  // be a ref rather than reading nearbyZone directly.
+  const currentZoneKeyRef = useRef(null);
   const incidentLimitRef = useRef(LIMIT_BY_TIME_FILTER[activeTimeFilter] ?? 10000);
 
   // Check permission status on mount so we don't re-ask if already granted.
@@ -481,15 +507,27 @@ const LiveMap = () => {
     }
   }, []);
 
+  // Ask for location exactly once, on mount. This used to live inside the
+  // data-loading effect below, which also depends on activeTimeFilter — so
+  // every time the user clicked a time-filter chip, requestLocation() fired
+  // again, flipping locationStatus to "requesting" for an instant. Since
+  // showLocationOverlay treats "requesting" as "show the permission banner",
+  // that made the "allow location access" overlay flash back up on every
+  // filter click even though permission had already been granted. Splitting
+  // this into its own mount-only effect fixes that.
+  useEffect(() => {
+    requestLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Fetch on mount and whenever the time window filter changes.
   // Each time window has its own incident limit so wider windows fetch
   // progressively more data instead of always pulling 10k on load.
   useEffect(() => {
-    requestLocation();
     const limit = LIMIT_BY_TIME_FILTER[activeTimeFilter] ?? 10000;
     incidentLimitRef.current = limit;
     load(true, limit);
-  }, [load, requestLocation, activeTimeFilter]);
+  }, [load, activeTimeFilter]);
 
   // Fetch historical risk-zone data once on mount. This is a static aggregate
   // (counts by grid cell + category + month) so it doesn't need auto-refresh.
@@ -658,21 +696,62 @@ const LiveMap = () => {
       // User is outside every danger radius — clear dismissal memory so a
       // future re-entry (to this or another zone) can alert again.
       if (dismissedZoneIds.size > 0) setDismissedZoneIds(new Set());
-      if (nearbyZone) setNearbyZone(null);
+      currentZoneKeyRef.current = null;
+      setNearbyZone((prev) => (prev ? null : prev));
       return;
     }
 
     const zoneKey = closest.incident_id ?? closest.id;
     if (dismissedZoneIds.has(zoneKey)) return;
 
+    // Bail out (without calling setNearbyZone) if we'd just be re-setting
+    // the same zone with a fresh object reference. nearbyZone used to be a
+    // dependency of this effect *and* get overwritten with a brand-new
+    // object every run, which meant: run → setNearbyZone(new ref) →
+    // re-render → effect sees a "changed" dependency → run again, forever.
+    // While the user stood still inside a danger radius this looped on
+    // every animation frame, redoing a full distance scan over every loaded
+    // incident (up to 30,000 for "All Time") each time — the single biggest
+    // source of the map's reported sluggishness. Comparing against the
+    // current zone key (via a ref, so it doesn't need to be a dependency)
+    // breaks the loop.
+    if (currentZoneKeyRef.current === zoneKey) return;
+    currentZoneKeyRef.current = zoneKey;
+
     setNearbyZone({ incident: closest, distanceKm: closestDist });
-  }, [liveUserCoords, processedIncidents, dismissedZoneIds, nearbyZone]);
+  }, [liveUserCoords, processedIncidents, dismissedZoneIds]);
+
+  // Aggregated once per riskZones change instead of being recomputed from
+  // scratch (looping the whole riskZones array) on every render — it used
+  // to run as an inline IIFE directly in JSX, so it re-ran on every state
+  // update anywhere in this component (filter clicks, popup opens, the
+  // proximity check firing, etc.), not just when riskZones itself changed.
+  const riskZoneCells = useMemo(() => {
+    if (!showRiskZones || riskZones.length === 0) return [];
+    const currentMonth = new Date().getMonth() + 1;
+    const cellBuckets = {};
+    let maxCount = 0;
+    riskZones.forEach((z) => {
+      if (z.month !== currentMonth) return;
+      const key = `${z.lat_bucket},${z.lng_bucket}`;
+      if (!cellBuckets[key]) {
+        cellBuckets[key] = { lat: z.lat_bucket, lng: z.lng_bucket, count: 0, categories: {} };
+      }
+      cellBuckets[key].count += z.count;
+      cellBuckets[key].categories[z.category] = (cellBuckets[key].categories[z.category] || 0) + z.count;
+      if (cellBuckets[key].count > maxCount) maxCount = cellBuckets[key].count;
+    });
+    return Object.values(cellBuckets)
+      .filter((cell) => cell.count > 0)
+      .map((cell) => ({ ...cell, intensity: maxCount > 0 ? cell.count / maxCount : 0 }));
+  }, [showRiskZones, riskZones]);
 
   const dismissProximityAlert = () => {
     if (nearbyZone?.incident) {
       const zoneKey = nearbyZone.incident.incident_id ?? nearbyZone.incident.id;
       setDismissedZoneIds((prev) => new Set(prev).add(zoneKey));
     }
+    currentZoneKeyRef.current = null;
     setNearbyZone(null);
   };
 
@@ -909,7 +988,7 @@ const LiveMap = () => {
           <div className="v-loading-overlay">
             <span className="v-loading-spinner" />
             <div className="v-overlay-card">
-              <p>{loading ? "Loading map incidents…" : "Allow location access to center the map on you."}</p>
+              <p>{loading ? "refreshing map incidents…" : "Allow location access to center the map on you."}</p>
               <div className="v-overlay-actions">
                 {!loading && (
                   <button className="v-btn v-btn-primary" onClick={requestLocation}>
@@ -956,61 +1035,46 @@ const LiveMap = () => {
                grid cell, category, and month. No ML, just honest counting.
                Color intensity = proportion of historical incidents in this
                cell vs the globally densest cell. */}
-          {showRiskZones && riskZones.length > 0 && (() => {
+          {showRiskZones && riskZoneCells.length > 0 && riskZoneCells.map((cell) => {
             const currentMonth = new Date().getMonth() + 1;
             const monthNames = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-            const cellBuckets = {};
-            let maxCount = 0;
-            riskZones.forEach((z) => {
-              if (z.month !== currentMonth) return;
-              const key = `${z.lat_bucket},${z.lng_bucket}`;
-              if (!cellBuckets[key]) {
-                cellBuckets[key] = { lat: z.lat_bucket, lng: z.lng_bucket, count: 0, categories: {} };
-              }
-              cellBuckets[key].count += z.count;
-              cellBuckets[key].categories[z.category] = (cellBuckets[key].categories[z.category] || 0) + z.count;
-              if (cellBuckets[key].count > maxCount) maxCount = cellBuckets[key].count;
-            });
             const gridHalf = 1.0;
-            return Object.values(cellBuckets).map((cell) => {
-              if (cell.count === 0) return null;
-              const intensity = cell.count / maxCount;
-              const r = Math.round(180 - intensity * 120);
-              const g = Math.round(40 - intensity * 20);
-              const b = Math.round(40 - intensity * 30);
-              const opacity = 0.25 + intensity * 0.55;
-              const strokeOpacity = 0.3 + intensity * 0.5;
-              return (
-                <Rectangle
-                  key={`risk-${cell.lat}-${cell.lng}`}
-                  bounds={[[cell.lat - gridHalf, cell.lng - gridHalf], [cell.lat + gridHalf, cell.lng + gridHalf]]}
-                  pathOptions={{
-                    color: `rgba(${r}, ${g}, ${b}, ${strokeOpacity})`,
-                    fillColor: `rgba(${r}, ${g}, ${b}, ${opacity})`,
-                    fillOpacity: opacity,
-                    weight: 1.5,
-                  }}
-                >
-                  <Popup>
-                    <div className="v-map-popup">
-                      <strong>Historical Risk Zone</strong>
-                      <div className="v-map-popup-meta v-mono">
-                        {monthNames[currentMonth]} · {cell.lat.toFixed(1)}°, {cell.lng.toFixed(1)}°
-                      </div>
-                      <div className="v-map-popup-desc">
-                        {cell.count} historical incident{cell.count !== 1 ? "s" : ""} in this area during {monthNames[currentMonth]}
-                      </div>
-                      {Object.entries(cell.categories).sort((a, b) => b[1] - a[1]).map(([cat, cnt]) => (
-                        <div key={cat} className="v-map-popup-meta v-mono" style={{ fontSize: 10, marginTop: 2 }}>
-                          {cat}: {cnt}
-                        </div>
-                      ))}
+            const { intensity } = cell;
+            const r = Math.round(180 - intensity * 120);
+            const g = Math.round(40 - intensity * 20);
+            const b = Math.round(40 - intensity * 30);
+            const opacity = 0.25 + intensity * 0.55;
+            const strokeOpacity = 0.3 + intensity * 0.5;
+            return (
+              <Rectangle
+                key={`risk-${cell.lat}-${cell.lng}`}
+                bounds={[[cell.lat - gridHalf, cell.lng - gridHalf], [cell.lat + gridHalf, cell.lng + gridHalf]]}
+                pathOptions={{
+                  color: `rgba(${r}, ${g}, ${b}, ${strokeOpacity})`,
+                  fillColor: `rgba(${r}, ${g}, ${b}, ${opacity})`,
+                  fillOpacity: opacity,
+                  weight: 1.5,
+                }}
+              >
+                <Popup>
+                  <div className="v-map-popup">
+                    <strong>Historical Risk Zone</strong>
+                    <div className="v-map-popup-meta v-mono">
+                      {monthNames[currentMonth]} · {cell.lat.toFixed(1)}°, {cell.lng.toFixed(1)}°
                     </div>
-                  </Popup>
-                </Rectangle>
-              );
-            });
-          })()}
+                    <div className="v-map-popup-desc">
+                      {cell.count} historical incident{cell.count !== 1 ? "s" : ""} in this area during {monthNames[currentMonth]}
+                    </div>
+                    {Object.entries(cell.categories).sort((a, b) => b[1] - a[1]).map(([cat, cnt]) => (
+                      <div key={cat} className="v-map-popup-meta v-mono" style={{ fontSize: 10, marginTop: 2 }}>
+                        {cat}: {cnt}
+                      </div>
+                    ))}
+                  </div>
+                </Popup>
+              </Rectangle>
+            );
+          })}
 
           {/* User's own live location — a distinct marker + accuracy halo
                so it's visually obvious which dot is "you" versus incidents. */}
@@ -1049,57 +1113,67 @@ const LiveMap = () => {
             </>
           )}
 
-          {visibleIncidents.map((incident) => {
-            const currentId = incident.incident_id ?? incident.id;
-            return (
-              <CircleMarker
-                key={currentId}
-                center={[incident.latitude, incident.longitude]}
-                radius={SEVERITY_RADIUS[incident.severity] || 7}
-                pathOptions={{
-                  color: SEVERITY_STROKE[incident.severity] || "#64748b",
-                  fillColor: SEVERITY_STROKE[incident.severity] || "#64748b",
-                  fillOpacity: 0.5,
-                  weight: 1.5,
-                }}
-              >
-                <Popup>
-                  <div className="v-map-popup">
-                    <div className="v-map-popup-header">
-                      <SeverityBadge severity={normalizeSeverity(incident.severity)} size="sm" />
-                      <span className="v-map-popup-country-tag">{incident.country}</span>
+          {/* Clustering is the main fix for the map being slow: with up to
+               30,000 incidents loaded for "All Time", rendering one
+               unclustered CircleMarker per incident meant thousands of live
+               vector layers on screen at once — every pan/zoom repainted
+               all of them. chunkedLoading adds them in batches instead of
+               all at once (keeps the tab responsive while incidents load),
+               and clustering itself means only a handful of cluster bubbles
+               are actually on screen at low/medium zoom levels. */}
+          <MarkerClusterGroup
+            chunkedLoading
+            maxClusterRadius={55}
+            spiderfyOnMaxZoom
+            showCoverageOnHover={false}
+            disableClusteringAtZoom={9}
+          >
+            {visibleIncidents.map((incident) => {
+              const currentId = incident.incident_id ?? incident.id;
+              return (
+                <Marker
+                  key={currentId}
+                  position={[incident.latitude, incident.longitude]}
+                  icon={SEVERITY_ICONS[incident.severity] || SEVERITY_ICONS.Low}
+                >
+                  <Popup>
+                    <div className="v-map-popup">
+                      <div className="v-map-popup-header">
+                        <SeverityBadge severity={normalizeSeverity(incident.severity)} size="sm" />
+                        <span className="v-map-popup-country-tag">{incident.country}</span>
+                      </div>
+                      <h4>{incident.title || "Untitled Incident"}</h4>
+                      <div className="v-map-popup-meta v-mono">
+                        {incident.category || "Unknown Category"} · {incident.source || "Unknown Source"}
+                      </div>
+                      {(() => {
+                        const statusInfo = getActiveStatusLabel(incident);
+                        return (
+                          <div className={`v-map-popup-status v-map-popup-status--${statusInfo.tone}`}>
+                            {statusInfo.text}
+                          </div>
+                        );
+                      })()}
+                      {incident.analyzed_at && (
+                        <div className="v-map-popup-time v-mono">{timeAgo(incident.analyzed_at)}</div>
+                      )}
+                      {incident.description && (
+                        <p className="v-map-popup-desc">{incident.description.slice(0, 220)}</p>
+                      )}
+                      <div className="v-map-popup-coords v-mono">
+                        {incident.latitude?.toFixed(3)}, {incident.longitude?.toFixed(3)}
+                      </div>
+                      {incident.url && (
+                        <a href={incident.url} target="_blank" rel="noopener noreferrer" className="v-map-popup-link">
+                          Source material <ExternalLink size={12} />
+                        </a>
+                      )}
                     </div>
-                    <h4>{incident.title || "Untitled Incident"}</h4>
-                    <div className="v-map-popup-meta v-mono">
-                      {incident.category || "Unknown Category"} · {incident.source || "Unknown Source"}
-                    </div>
-                    {(() => {
-                      const statusInfo = getActiveStatusLabel(incident);
-                      return (
-                        <div className={`v-map-popup-status v-map-popup-status--${statusInfo.tone}`}>
-                          {statusInfo.text}
-                        </div>
-                      );
-                    })()}
-                    {incident.analyzed_at && (
-                      <div className="v-map-popup-time v-mono">{timeAgo(incident.analyzed_at)}</div>
-                    )}
-                    {incident.description && (
-                      <p className="v-map-popup-desc">{incident.description.slice(0, 220)}</p>
-                    )}
-                    <div className="v-map-popup-coords v-mono">
-                      {incident.latitude?.toFixed(3)}, {incident.longitude?.toFixed(3)}
-                    </div>
-                    {incident.url && (
-                      <a href={incident.url} target="_blank" rel="noopener noreferrer" className="v-map-popup-link">
-                        Source material <ExternalLink size={12} />
-                      </a>
-                    )}
-                  </div>
-                </Popup>
-              </CircleMarker>
-            );
-          })}
+                  </Popup>
+                </Marker>
+              );
+            })}
+          </MarkerClusterGroup>
         </MapContainer>
 
         {/* Compact always-visible legend, useful once controls/filters are

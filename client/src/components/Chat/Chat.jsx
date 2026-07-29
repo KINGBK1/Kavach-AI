@@ -3,6 +3,7 @@ import { Send, Bot, User as UserIcon, Sparkles, MapPin, Copy, Check, Trash2, Rot
 import PageShell from "../Layout/PageShell";
 import { askAI } from "../../api/varunaApi";
 import { lookUpLocationName } from "../../utils/geolocation";
+import { QuantumTypingLoader } from "../common/CreativeLoaders";
 import "./Chat.css";
 
 const SUGGESTIONS = [
@@ -342,8 +343,8 @@ const Chat = () => {
           {sending && (
             <div className="v-chat-row assistant">
               <div className="v-chat-avatar"><Bot size={16} /></div>
-              <div className="v-chat-bubble v-chat-typing">
-                <span /><span /><span />
+              <div style={{ marginLeft: 6 }}>
+                <QuantumTypingLoader message="Querying RAG index & generating answer..." />
               </div>
             </div>
           )}

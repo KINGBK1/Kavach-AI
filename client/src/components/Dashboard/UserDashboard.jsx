@@ -18,6 +18,7 @@ import {
   CalendarDays
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { KavachSkeleton, RadarPulseLoader } from "../common/CreativeLoaders";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -76,7 +77,7 @@ const StatCard = ({ label, value, loading, icon: Icon, trend, trendClass = "posi
       )}
     </div>
     {loading ? (
-      <div className="v-premium-skeleton" style={{ height: 32, width: "70%", borderRadius: "8px" }} />
+      <KavachSkeleton height={32} width="70%" borderRadius="8px" />
     ) : (
       <div className="v-kpi-value-wrapper">
         <div className="v-kpi-value">{value}</div>

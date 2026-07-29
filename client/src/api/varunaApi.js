@@ -57,7 +57,7 @@ export const getDailyIncidents = async () => {
 // effectively unbounded, causing slow page loads and excessive Neon DB
 // egress.  The chat/RAG path is unaffected — it queries the DB
 // independently via retriever.py with its own limit (default 10).
-export const getIncidents = async (limit = 3000, offset = 0) => {
+export const getIncidents = async (limit = 6000, offset = 0) => {
   const { data } = await client.get("/incidents", { params: { limit, offset } });
   return Array.isArray(data) ? data : [];
 };
@@ -315,6 +315,16 @@ export const rejectReport = async (reportId) => {
     report_id: reportId,
     reviewed_by: "admin",
   });
+  return data;
+};
+
+/** POST /incidents/status — update incident status (e.g. 'resolved' or 'active') (admin) */
+export const updateIncidentStatus = async (incidentId, status) => {
+  const { data } = await client.post("/incidents/status", {
+    incident_id: incidentId,
+    status,
+  });
+  invalidateDashboardCache();
   return data;
 };
 

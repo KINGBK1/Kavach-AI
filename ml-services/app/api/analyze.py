@@ -3,7 +3,12 @@ from pydantic import BaseModel
 from app.models.request import IncidentRequest
 from app.models.incident import Incident
 from app.services.analyzer import analyze_incident, analyze_fetched_incident
-from app.services.store import get_dashboard_stats, get_stored_analyses, get_analyses_count
+from app.services.store import (
+    get_dashboard_stats,
+    get_stored_analyses,
+    get_analyses_count,
+    update_incident_status,
+)
 from app.services.citizen_reports import (
     check_rate_limit,
     find_corroborating_incidents,
@@ -19,6 +24,22 @@ router = APIRouter(
     prefix="/analyze",
     tags=["Analysis"]
 )
+
+class StatusUpdateRequest(BaseModel):
+    incident_id: str
+    status: str
+
+
+@router.post("/incidents/status")
+def update_status(req: StatusUpdateRequest):
+    try:
+        updated = update_incident_status(req.incident_id, req.status)
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"Incident {req.incident_id} not found")
+        return {"incident_id": req.incident_id, "status": req.status.lower().strip(), "success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.post("")
 def analyze(incident: IncidentRequest):

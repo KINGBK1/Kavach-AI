@@ -7,7 +7,6 @@ import {
   CheckCircle,
   XCircle,
   Loader2,
-  UserCheck,
   Users,
   Building,
   Briefcase,
@@ -22,10 +21,23 @@ import {
   Sparkles,
   Hourglass,
   Flag,
+  Siren,
+  Search,
+  Check,
+  RotateCcw,
 } from "lucide-react";
 import PageShell from "../Layout/PageShell";
-import { getPendingUsers, approveUser, getCitizenReports, promoteReport, rejectReport } from "../../api/varunaApi";
+import {
+  getPendingUsers,
+  approveUser,
+  getCitizenReports,
+  promoteReport,
+  rejectReport,
+  getIncidents,
+  updateIncidentStatus,
+} from "../../api/varunaApi";
 import { SeverityBadge, PriorityScore, ConfidenceBadge } from "../common/Severity";
+import { ShieldAgentLoader, RadarPulseLoader, KavachSkeleton, ButtonSpinner } from "../common/CreativeLoaders";
 import { useToast } from "../Toast/ToastContext";
 import "../Reports/Reports.css";
 import "./AdminDashboard.css";
@@ -40,6 +52,7 @@ const ROLE_CONFIG = {
 const TABS = [
   { key: "users", label: "User Approvals", icon: Users },
   { key: "reports", label: "Review Reports", icon: FileText },
+  { key: "incidents", label: "Manage Incidents", icon: Siren },
 ];
 
 const AdminDashboard = () => {
@@ -55,6 +68,13 @@ const AdminDashboard = () => {
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportsError, setReportsError] = useState(null);
   const [reportActionLoading, setReportActionLoading] = useState(null);
+
+  const [incidentsList, setIncidentsList] = useState([]);
+  const [incidentsLoading, setIncidentsLoading] = useState(false);
+  const [incidentsError, setIncidentsError] = useState(null);
+  const [incidentSearch, setIncidentSearch] = useState("");
+  const [incidentStatusFilter, setIncidentStatusFilter] = useState("all");
+  const [updatingIncidentId, setUpdatingIncidentId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,8 +95,6 @@ const AdminDashboard = () => {
     setReportsLoading(true);
     setReportsError(null);
     try {
-      // Fetch ALL citizen reports (no status filter) so the admin sees
-      // unverified, rejected, and even low-confidence verified reports.
       const data = await getCitizenReports({ status: null, limit: 200 });
       setReports(Array.isArray(data) ? data : []);
     } catch (err) {
@@ -88,8 +106,49 @@ const AdminDashboard = () => {
     }
   }, [addToast]);
 
+  const loadIncidents = useCallback(async () => {
+    setIncidentsLoading(true);
+    setIncidentsError(null);
+    try {
+      const data = await getIncidents(1000);
+      setIncidentsList(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Failed to load incidents:", err);
+      setIncidentsError("Could not load incidents.");
+      addToast("Failed to load incidents", "error");
+    } finally {
+      setIncidentsLoading(false);
+    }
+  }, [addToast]);
+
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (activeTab === "reports") loadReports(); }, [activeTab, loadReports]);
+  useEffect(() => { if (activeTab === "incidents") loadIncidents(); }, [activeTab, loadIncidents]);
+
+  const handleStatusToggle = async (incidentId, currentStatus) => {
+    const targetStatus = currentStatus === "resolved" ? "active" : "resolved";
+    setUpdatingIncidentId(incidentId);
+    try {
+      await updateIncidentStatus(incidentId, targetStatus);
+      addToast(
+        targetStatus === "resolved"
+          ? "Incident marked as Resolved — updated in database & map"
+          : "Incident status restored to Active",
+        "success"
+      );
+      setIncidentsList((prev) =>
+        prev.map((item) =>
+          (item.id === incidentId || item.incident_id === incidentId)
+            ? { ...item, status: targetStatus }
+            : item
+        )
+      );
+    } catch (err) {
+      addToast("Failed to update status: " + (err.response?.data?.detail || err.message), "error");
+    } finally {
+      setUpdatingIncidentId(null);
+    }
+  };
 
   const handleApprove = async (userId) => {
     setActionLoading(userId);
@@ -451,6 +510,121 @@ const AdminDashboard = () => {
                 );
               })}
             </div>
+          </>
+        )}
+
+        {activeTab === "incidents" && (
+          <>
+            <div className="v-admin-filter-bar" style={{ flexWrap: "wrap", gap: "1rem" }}>
+              <div className="v-incidents-search-box" style={{ display: "flex", alignItems: "center", gap: 8, background: "#f8fafc", padding: "6px 12px", borderRadius: 8, border: "1px solid #e2e8f0", flex: "1 1 300px" }}>
+                <Search size={14} style={{ color: "#94a3b8" }} />
+                <input
+                  type="text"
+                  placeholder="Search incidents by title, category, source..."
+                  value={incidentSearch}
+                  onChange={(e) => setIncidentSearch(e.target.value)}
+                  style={{ border: "none", outline: "none", background: "transparent", width: "100%", fontSize: "0.875rem" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: 6 }}>
+                {["all", "active", "resolved"].map((st) => (
+                  <button
+                    key={st}
+                    className={`v-admin-filter-btn ${incidentStatusFilter === st ? "active" : ""}`}
+                    onClick={() => setIncidentStatusFilter(st)}
+                    style={{ textTransform: "capitalize" }}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {incidentsLoading && (
+              <div style={{ padding: "2rem 0" }}>
+                <RadarPulseLoader label="Loading emergency incident pool..." />
+              </div>
+            )}
+
+            {incidentsError && <div className="v-trust-ledger-state v-trust-ledger-error">{incidentsError}</div>}
+
+            {!incidentsLoading && !incidentsError && (
+              <div className="v-trust-ledger-list">
+                {incidentsList
+                  .filter((item) => {
+                    const status = (item.status || "active").toLowerCase();
+                    if (incidentStatusFilter === "active" && status === "resolved") return false;
+                    if (incidentStatusFilter === "resolved" && status !== "resolved") return false;
+                    if (incidentSearch.trim()) {
+                      const q = incidentSearch.toLowerCase();
+                      const title = (item.title || "").toLowerCase();
+                      const category = (item.category || "").toLowerCase();
+                      const source = (item.source || "").toLowerCase();
+                      return title.includes(q) || category.includes(q) || source.includes(q);
+                    }
+                    return true;
+                  })
+                  .slice(0, 100)
+                  .map((incident) => {
+                    const id = incident.id || incident.incident_id;
+                    const isResolved = (incident.status || "").toLowerCase() === "resolved";
+                    const isUpdating = updatingIncidentId === id;
+
+                    return (
+                      <div key={id} className={`v-trust-ledger-card ${isResolved ? "resolved-card" : ""}`} style={{ borderLeft: isResolved ? "4px solid #64748b" : "4px solid #2563eb" }}>
+                        <div className="v-trust-ledger-card-top">
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <SeverityBadge severity={incident.severity} size="sm" />
+                            <span className="v-source-tag">{incident.source || "SYSTEM"}</span>
+                            <span className="v-category-tag">{incident.category || "General"}</span>
+                          </div>
+                          <span className={`v-status-pill ${isResolved ? "resolved" : "active"}`} style={{ padding: "2px 8px", borderRadius: 12, fontSize: "0.75rem", fontWeight: 600, background: isResolved ? "#f1f5f9" : "#dbeafe", color: isResolved ? "#475569" : "#1d4ed8" }}>
+                            {isResolved ? "Resolved" : "Active"}
+                          </span>
+                        </div>
+
+                        <h4 style={{ margin: "0.5rem 0", fontSize: "1rem", color: "#0f172a" }}>
+                          {incident.title}
+                        </h4>
+
+                        {incident.description && (
+                          <p className="v-trust-ledger-description" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                            {incident.description}
+                          </p>
+                        )}
+
+                        <div className="v-trust-ledger-meta">
+                          <MapPin size={12} />
+                          {incident.latitude?.toFixed(4)}, {incident.longitude?.toFixed(4)}
+                          {incident.timestamp ? ` · ${new Date(incident.timestamp).toLocaleString()}` : ""}
+                        </div>
+
+                        <div className="v-review-actions" style={{ marginTop: "1rem" }}>
+                          <button
+                            className={`v-btn ${isResolved ? "tertiary" : "v-review-promote"}`}
+                            onClick={() => handleStatusToggle(id, incident.status)}
+                            disabled={isUpdating}
+                            style={{ gap: 6 }}
+                          >
+                            {isUpdating ? (
+                              <ButtonSpinner size={14} />
+                            ) : isResolved ? (
+                              <>
+                                <RotateCcw size={14} /> Reactivate Incident
+                              </>
+                            ) : (
+                              <>
+                                <Check size={14} /> Mark as Resolved
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </>
         )}
       </div>
