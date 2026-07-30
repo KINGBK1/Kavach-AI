@@ -175,16 +175,20 @@ const SignInPage = () => {
             {message && <div className={`message-box message-box--${messageType}`}>{message}</div>}
 
             <div className="judge-demo__section">
+              <div className="judge-demo__label">
+                <Shield size={13} />
+                For hackathon judges
+              </div>
               <button
                 type="button"
                 onClick={handleJudgeLogin}
                 className="button button--judge-demo"
               >
                 <Shield size={18} />
-                Continue as Judge (Demo Access)
+                Continue as Judge (Full Access)
               </button>
               <p className="judge-demo__hint">
-                Reviewing for the hackathon? Skip sign-up and explore the live app instantly.
+                One click — see every feature instantly, no sign-up needed.
               </p>
               <div className="divider">
                 <span className="divider__text">or sign in normally</span>

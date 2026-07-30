@@ -24,3 +24,17 @@ export const AUTH_BASE_URL = `${AUTH_ORIGIN}/api`;
 export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
 export const GOOGLE_AUTH_ENABLED = Boolean(GOOGLE_CLIENT_ID);
+
+// ===========================================================================
+// TEMPORARY — HACKATHON JUDGING WINDOW ONLY
+// ===========================================================================
+// When true, the frontend shows admin-only UI (Admin Panel nav link) to
+// every logged-in user, matching the backend's own KAVACH_JUDGING_MODE
+// override — so a judge signing in with their own Google account, not the
+// pre-made judge-demo account, still sees every feature.
+//
+// TO REVERT AFTER JUDGING: set VITE_JUDGING_MODE=false (or remove it) and
+// redeploy. Consider deleting this flag and its usages entirely once the
+// judging window is over.
+export const JUDGING_MODE = import.meta.env.VITE_JUDGING_MODE === "true";
+// ===========================================================================

@@ -14,12 +14,37 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::models::user::{
-    AuthResponse, GoogleLoginRequest, LoginRequest, PublicUser, RegisterRequest,
+    AuthResponse, GoogleLoginRequest, LoginRequest, ProfileUpdate, PublicUser, RegisterRequest,
 };
 use crate::repository::users::UserRepository;
 use crate::services::auth_extractor::AuthUser;
 use crate::services::{google_auth, jwt};
 use crate::state::AppState;
+
+// ===========================================================================
+// TEMPORARY — HACKATHON JUDGING WINDOW ONLY
+// ===========================================================================
+// While KAVACH_JUDGING_MODE=true, every authenticated user is treated as an
+// admin for the purposes of the three checks below (approve_user,
+// list_users, list_pending_users). This exists so a judge who signs in with
+// their own Google account — instead of the pre-made judge-demo account —
+// still sees the Admin Panel and every feature, without us having to
+// individually promote every possible judge account to role='admin' ahead
+// of time.
+//
+// TO REVERT AFTER JUDGING: set KAVACH_JUDGING_MODE=false (or unset it — it
+// defaults to false) in the backend's environment and restart. No code
+// change needed to turn this off. Consider deleting this block entirely
+// once the judging window is over, so it can't be accidentally left on.
+fn is_effectively_admin(role: &str) -> bool {
+    if role == "admin" {
+        return true;
+    }
+    std::env::var("KAVACH_JUDGING_MODE")
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+// ===========================================================================
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -29,7 +54,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/login", post(login))
         .route("/google-login", post(google_login))
         .route("/status", get(status))
+        .route("/profile", patch(update_profile))
         .route("/approve/{id}", patch(approve_user))
+        .route("/users", get(list_users))
+        .route("/users/pending", get(list_pending_users))
         .with_state(state)
 }
 
@@ -82,7 +110,10 @@ async fn register(
         if repo
             .find_by_email(email)
             .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+            .map_err(|e| {
+                tracing::error!("register: find_by_email failed: {e:?}");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+            })?
             .is_some()
         {
             return Err(err(StatusCode::BAD_REQUEST, "Email already registered"));
@@ -92,7 +123,10 @@ async fn register(
     if repo
         .find_by_username(&payload.username)
         .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+        .map_err(|e| {
+            tracing::error!("register: find_by_username failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?
         .is_some()
     {
         return Err(err(StatusCode::BAD_REQUEST, "Username already taken"));
@@ -171,7 +205,10 @@ async fn login(
     let user = repo
         .find_by_username(&payload.username)
         .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+        .map_err(|e| {
+            tracing::error!("login: find_by_username failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
 
     if !user.is_approved {
@@ -278,6 +315,40 @@ async fn status(AuthUser(user): AuthUser) -> Json<Value> {
 }
 
 // ---------------------------------------------------------------------
+// Update profile (location, preferences) — authenticated
+// ---------------------------------------------------------------------
+async fn update_profile(
+    State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
+    Json(payload): Json<ProfileUpdate>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    tracing::info!(
+        "PATCH /auth/profile user_id={} lat={:?} lng={:?}",
+        current_user.id, payload.latitude, payload.longitude
+    );
+    let repo = UserRepository::new(state.db.clone());
+
+    let user = repo
+        .update_profile(
+            current_user.id,
+            payload.latitude,
+            payload.longitude,
+            payload.preferences,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("update_profile failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
+
+    Ok(Json(json!({
+        "success": true,
+        "user": PublicUser::from(user)
+    })))
+}
+
+// ---------------------------------------------------------------------
 // Approve a pending NGO/DDMO/Admin account (admin only)
 // ---------------------------------------------------------------------
 async fn approve_user(
@@ -285,7 +356,7 @@ async fn approve_user(
     AuthUser(current_user): AuthUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    if current_user.role != "admin" {
+    if !is_effectively_admin(&current_user.role) {
         return Err(err(
             StatusCode::FORBIDDEN,
             "Access denied. Required roles: admin",
@@ -296,11 +367,56 @@ async fn approve_user(
     let user = repo
         .set_approved(id, true)
         .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Database error"))?
+        .map_err(|e| {
+            tracing::error!("approve_user: set_approved failed: {e:?}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+        })?
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
 
     Ok(Json(json!({
         "message": "User approved",
         "user": PublicUser::from(user)
     })))
+}
+
+// ---------------------------------------------------------------------
+// List all users (admin only)
+// ---------------------------------------------------------------------
+async fn list_users(
+    State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if !is_effectively_admin(&current_user.role) {
+        return Err(err(StatusCode::FORBIDDEN, "Access denied. Admins only."));
+    }
+
+    let repo = UserRepository::new(state.db.clone());
+    let users = repo.list_all().await.map_err(|e| {
+        tracing::error!("list_users failed: {e:?}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+
+    let public: Vec<PublicUser> = users.into_iter().map(PublicUser::from).collect();
+    Ok(Json(json!({ "users": public })))
+}
+
+// ---------------------------------------------------------------------
+// List pending (unapproved) users (admin only)
+// ---------------------------------------------------------------------
+async fn list_pending_users(
+    State(state): State<Arc<AppState>>,
+    AuthUser(current_user): AuthUser,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if !is_effectively_admin(&current_user.role) {
+        return Err(err(StatusCode::FORBIDDEN, "Access denied. Admins only."));
+    }
+
+    let repo = UserRepository::new(state.db.clone());
+    let users = repo.list_pending().await.map_err(|e| {
+        tracing::error!("list_pending_users failed: {e:?}");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Database error")
+    })?;
+
+    let public: Vec<PublicUser> = users.into_iter().map(PublicUser::from).collect();
+    Ok(Json(json!({ "users": public })))
 }

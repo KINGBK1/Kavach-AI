@@ -2,6 +2,7 @@ import React, { useContext } from "react";
 import UserDashboardNavbar from "../Dashboard/Navbar/UserDashboardNav";
 import Footer from "../Footer/Footer";
 import LocationPermissionBanner from "./LocationPermissionBanner";
+import JudgingAccessModal from "./JudgingAccessModal";
 import PageTransition from "../common/Animations/PageTransition";
 import { AuthContext } from "../Auth/context/authContextValue";
 import "./PageShell.css";
@@ -13,6 +14,7 @@ const PageShell = ({ children, noFooter = false }) => {
     <div className="v-page-shell">
       <UserDashboardNavbar user={user} />
       <LocationPermissionBanner />
+      <JudgingAccessModal />
       <main className="v-page-content">
         <PageTransition>{children}</PageTransition>
       </main>

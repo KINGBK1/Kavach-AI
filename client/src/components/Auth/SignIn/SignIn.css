@@ -471,6 +471,22 @@ body {
 /* Judge / Hackathon Demo Access */
 .judge-demo__section {
   margin-bottom: var(--spacing-lg);
+  padding: 1rem;
+  border-radius: var(--border-radius-md);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(34, 197, 94, 0.02));
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.judge-demo__label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--green);
+  margin-bottom: 0.6rem;
 }
 
 .button--judge-demo {
@@ -478,26 +494,36 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.875rem 1.5rem;
-  font-size: 0.95rem;
-  font-weight: 600;
+  gap: 0.6rem;
+  padding: 1.05rem 1.5rem;
+  font-size: 1.05rem;
+  font-weight: 700;
   border-radius: var(--border-radius-md);
   cursor: pointer;
-  background: white;
-  color: var(--green);
+  background: var(--green);
+  color: white;
   border: 2px solid var(--green);
-  transition: background 0.2s ease-in-out, color 0.2s ease-in-out;
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35);
+  transition: transform 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+  animation: judge-demo-pulse 2.4s ease-in-out infinite;
 }
 
 .button--judge-demo:hover {
   background: var(--green);
   color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(34, 197, 94, 0.45);
+  animation-play-state: paused;
+}
+
+@keyframes judge-demo-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35); }
+  50% { box-shadow: 0 4px 22px rgba(34, 197, 94, 0.6); }
 }
 
 .judge-demo__hint {
-  margin-top: 0.5rem;
-  font-size: 0.8rem;
+  margin-top: 0.6rem;
+  font-size: 0.82rem;
   color: var(--color-text-light);
   text-align: center;
 }

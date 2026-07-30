@@ -16,6 +16,7 @@ import {
   } from "lucide-react";
 import { useNavigate, Link, NavLink } from "react-router-dom";
 import { AuthContext } from "../../Auth/context/authContextValue";
+import { JUDGING_MODE } from "../../../config";
 import "./UserDashboardNav.css";
 import brandLogo from "../../../assets/varuna.png";
 
@@ -94,7 +95,9 @@ const UserDashboardNavbar = ({ user }) => {
     { name: "Incidents", icon: Activity, href: "/incidents" },
     { name: "Ask Kavach", icon: MessageSquare, href: "/chat" },
     { name: "Trust Ledger", icon: ShieldCheck, href: "/trust-ledger" },
-    ...(safeUser?.role === "admin"
+    // JUDGING_MODE (temporary, see config.js) shows this to every logged-in
+    // user, not just role === "admin" — see config.js for how to revert.
+    ...(safeUser?.role === "admin" || JUDGING_MODE
       ? [{ name: "Admin Panel", icon: ShieldCheck, href: "/admin" }]
       : []),
   ];
