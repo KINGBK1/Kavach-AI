@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import SignUpPage from './components/Auth/SignUp/SignUp';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import UserDashboard from './components/Dashboard/UserDashboard';
@@ -16,6 +16,7 @@ import ReviewQueue from './components/ReviewQueue/ReviewQueue';
 import AdminDashboard from './components/Admin/AdminDashboard';
 import { ToastProvider } from './components/Toast/ToastContext';
 import { GOOGLE_AUTH_ENABLED, GOOGLE_CLIENT_ID } from './config';
+import AppTour, { TourLaunchButton } from './components/Tour/AppTour';
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -55,6 +56,19 @@ const Providers = ({ children }) => {
   return <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{children}</GoogleOAuthProvider>;
 };
 
+// Keeps the tour + its launch button off the sign-in/sign-up screens,
+// where none of the tour's target elements exist yet anyway.
+const TourWidgets = () => {
+  const location = useLocation();
+  if (location.pathname === "/signin" || location.pathname === "/signup") return null;
+  return (
+    <>
+      <AppTour />
+      <TourLaunchButton />
+    </>
+  );
+};
+
 const App = () => {
   return (
     <AppErrorBoundary>
@@ -62,6 +76,7 @@ const App = () => {
         <AuthProvider>
           <ToastProvider>
             <Router>
+              <TourWidgets />
               <Routes>
                 {/* Public Routes */}
                 <Route path="/signup" element={<SignUpPage />} />
@@ -94,3 +109,4 @@ const App = () => {
 };
 
 export default App;
+
